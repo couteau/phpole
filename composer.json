@@ -1,5 +1,5 @@
 {
-	"name" : "Cryptodira/PhpMsOle",
+	"name" : "cryptodira/phpmsole",
 	"type" : "library",
 	"description" : "Native PHP manipulation of Microsoft OLE compound files",
 	"license" : "GPL-3.0+",

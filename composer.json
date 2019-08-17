@@ -1,0 +1,27 @@
+{
+	"name" : "Cryptodira/PhpMsOle",
+	"type" : "library",
+	"description" : "Native PHP manipulation of Microsoft OLE compound files",
+	"license" : "GPL-3.0+",
+	"keywords" : [
+		"Microsoft Office OLE"
+	],
+	"autoload" : {
+		"psr-4" : {
+			"Cryptodira\\PhpMsOle\\" : "src"
+		}
+	},
+	"require" : {
+		"php" : ">=7.3",
+		"phpseclib/phpseclib": "~2.0"
+        },
+        "require-dev": {
+                "phpunit/phpunit": "^8.2"
+	},
+	"authors" : [{
+			"name" : "Stuart C. Naifeh",
+			"email" : "stuart@cryptodira.org"
+		}
+	],
+	"minimum-stability" : "dev"
+}

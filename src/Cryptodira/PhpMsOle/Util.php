@@ -95,7 +95,7 @@ function ReadCodePageString($buffer, $offset, &$bytesread, $codepage=null)
     if ($size == 0)
         return '';
 
-    $str = substr($buffer, 4, $size);
+    $str = substr($buffer, $offset+4, $size);
     $bytesread = 4 + $size;
     return ConvertEncoding($str, $codepage);
 }

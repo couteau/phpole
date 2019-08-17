@@ -272,7 +272,7 @@ class PropertyBag
                 }
                 else {
                     $propoffset += $offset;
-                    $value = $this->GetPropertyValue($data, $propoffset);
+                    $value = $this->ReadPropertyValue($data, $propoffset);
                 }
 
                 $props[$id] = $value;
@@ -355,7 +355,7 @@ class PropertyBag
      * @param int $type
      * @return mixed
      */
-    private function GetPropertyValue($data, &$offset, $type = null)
+    private function ReadPropertyValue($data, &$offset, $type = null)
     {
         if (!$type || $type == VT_VARIANT) {
             $type = unpack(self::PropertyValueFormat, $data, $offset)['Type'];
@@ -442,7 +442,7 @@ class PropertyBag
                     $value = array();
                     $offset += 4;
                     for ($i = 0; $i < $size; $i++)
-                        $value[] = $this->GetPropertyValue($data, $offset, $type & 0xFFF);
+                        $value[] = $this->ReadPropertyValue($data, $offset, $type & 0xFFF);
                 }
                 else if ($type & VT_ARRAY)
                     $value = null; // Not supporting Arrays for now
@@ -451,6 +451,11 @@ class PropertyBag
         }
 
         return $value;
+    }
+
+    public function GetProperties()
+    {
+        return $this->properties;
     }
 }
 

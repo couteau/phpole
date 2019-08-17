@@ -23,5 +23,5 @@
 			"email" : "stuart@cryptodira.org"
 		}
 	],
-	"minimum-stability" : "dev"
+	"minimum-stability" : "stable"
 }

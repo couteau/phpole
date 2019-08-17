@@ -80,7 +80,7 @@ function ConvertEncoding($str, $codepage = null)
 
 function ReadUnicodeString($buffer, $offset, &$bytesread)
 {
-    $size = unpack('V1Size', $buffer, $offset)[1];
+    $size = unpack('V1', $buffer, $offset)[1];
     if ($size == 0)
         return '';
 
@@ -91,7 +91,7 @@ function ReadUnicodeString($buffer, $offset, &$bytesread)
 
 function ReadCodePageString($buffer, $offset, &$bytesread, $codepage=null)
 {
-    $size = unpack('V1Size', $buffer)[1];
+    $size = unpack('V1', $buffer, $offset)[1];
     if ($size == 0)
         return '';
 

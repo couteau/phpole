@@ -8,7 +8,7 @@
 	],
 	"autoload" : {
 		"psr-4" : {
-			"Cryptodira\\PhpMsOle\\" : "src"
+			"Cryptodira\\PhpMsOle\\" : "src/Cryptodira/PhpMsOle"
 		},
 		"psr-0" : {
 			"Cryptodira\\PhpMsOle\\" : "src/"

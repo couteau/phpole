@@ -2,6 +2,7 @@
 namespace Cryptodira\PhpMsOle;
 
 use function Cryptodira\PhpMsOle\Util\ReadCodePageString;
+use function Cryptodira\PhpMsOle\Util\ConvertEncoding;
 
 require_once('Util.php');
 
@@ -249,8 +250,11 @@ class PropertyBag
         $this->header = unpack(self::PropertyStreamHeaderFormat, $data);
         $uuid = array_values(array_splice($this->header, 5, 5));
         $this->header['FMTID0'] = dechex($uuid[0]) . dechex($uuid[1]) . dechex($uuid[2]) . $uuid[3] . $uuid[4];
-        if ($this->header['NumPropertySets'] == 2)
-            $this->header = array_merge($this->header, unpack('H32FMTID1/V1Offset1', $data, 48));
+        if ($this->header['NumPropertySets'] == 2) {
+            $h = unpack('V1FMTID11/v1FMTID12/v1FMTID13/H4FMTID14/H12FMTID15/V1Offset1', $data, 48);
+            $this->header['FMTID1'] = dechex($h['FMTID11']) . dechex($h['FMTID12']) . dechex($h['FMTID13']) . $h['FMTID14'] . $h['FMTID15'];
+            $this->header['Offset1'] = $h['Offset1'];
+        }
         $this->properties = array();
         for ($i=0; $i < $this->header['NumPropertySets']; $i++) {
             $this->codepage = 1252;
@@ -259,7 +263,7 @@ class PropertyBag
             elseif ($this->header['FMTID' . $i ] == FMTID_DocSummaryInformation)
                 $dictionary = self::$DocumentSummaryDictionary;
             else
-                $dictionary = null;
+                $dictionary = array();
 
             $offset = $this->header['Offset' . $i];
             $header = unpack(self::PropertySetHeaderFormat, $data, $offset);
@@ -267,18 +271,18 @@ class PropertyBag
             for ($j=0; $j < $header['NumProperties']; $j++) {
                 [, $id, $propoffset] = unpack('V2', $data, $offset + 8 + $j*8);
                 if ($id == PID_DICTIONARY) {
-                    $dictionary = $this->ReadDictionary($data, $offset + $propoffset);
-                    $value = null;
+                    $dictionary = array_replace($dictionary, $this->ReadDictionary($data, $offset + $propoffset));
+                    continue;
                 }
                 else {
                     $propoffset += $offset;
                     $value = $this->ReadPropertyValue($data, $propoffset);
                 }
 
-                $props[$id] = $value;
-
                 if ($id == PID_CODEPAGE)
                     $this->codepage = $value;
+                else
+                    $props[$id] = $value;
             }
 
             // if the property set contained a dictionary, substitute property names for ids
@@ -296,35 +300,6 @@ class PropertyBag
     }
 
     /**
-     * Convert the encoding of the passed string from the codepage for this property set to UTF-8
-     *
-     * @param string $str
-     * @return string
-     */
-    private function convert_encoding($str)
-    {
-        if (isset(mb_encodings[$this->codepage]))
-            $out = mb_convert_encoding($str, 'UTF-8', mb_encodings[$this->codepage]);
-        elseif (isset(iconv_encodings[$this->codepage])) {
-            $out = iconv(iconv_encodings[$this->codepage], 'UTF-8//TRANSLIT', $str);
-            if (!$out)
-                $out = iconv(iconv_encodings[$this->codepage], 'UTF-8//IGNORE', $str);
-        }
-        elseif ($this->codepage >= 437 && $this->codepage <= 1258) {
-            $cp = 'CP' . $this->codepage;
-            $out = iconv($cp, 'UTF-8//TRANSLIT', $str);
-            if (!$out)
-                $out = iconv($cp, 'UTF-8//IGNORE', $str);
-            if (!$out)
-                $out = $str;
-        }
-        else
-            $out = $str;
-
-        return rtrim($out, "\0");
-    }
-
-    /**
      * Read a dictonary from a dictionary property
      *
      * @param string $data
@@ -339,9 +314,9 @@ class PropertyBag
             [, $id, $length] = unpack('V2', $data, $o);
             if ($this->codepage == "UTF-16LE")
                 $length = 2 * $length;
-            $name = mb_convert_encoding(substr($data, $o+8, $length), 'UTF-8', $this->codpage);
+            $name = ConvertEncoding(substr($data, $o+8, $length), $this->codepage);
             $dictionary[$id] = $name;
-            $o += 8 + $length + ((4 - ($value['Size'] % 4) % 4));
+            $o += 8 + $length;
         }
 
         return $dictionary;
@@ -383,7 +358,8 @@ class PropertyBag
                 $offset += 4;
                 break;
             case VT_DATE:
-                $value = MSDATETIME_BASE + $value['Value'] * 86400;
+                $value = new \DateTime();
+                $value->setTimestamp(MSDATETIME_BASE + $value['Value'] * 86400);
                 $offset += 8;
                 break;
             case VT_BOOL:
@@ -422,10 +398,12 @@ class PropertyBag
                 $ft =  ($value['dwHighDateTime'] << 32) | $value['dwLowDateTime'];
                 if ($ft==0)
                     $value = null;
-                else
-                    $value = FILETIME_BASE + $ft / 10000000;
+                else {
+                    $value = new \DateTime();
+                    $value->setTimestamp(FILETIME_BASE + $ft / 10000000);
+                }
                 break;
-            // Unsupported Types
+            // Not supporting these types yet
             case VT_BLOB:
             case VT_STREAM:
             case VT_STORAGE:

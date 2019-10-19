@@ -9,8 +9,8 @@ namespace Cryptodira\PhpMsOle;
  */
 class OLEStreamReader
 {
-    /* @var OLEDocument */
-    private $OLEDocument;
+    /** @var OLEDocument $ole*/
+    private $ole;
     private $streamid;
     private $startingsector;
     private $fat;
@@ -24,48 +24,53 @@ class OLEStreamReader
     /**
      * Create a new OLE stream reader for a given stream within an OLE compound document
      *
-     * @param OLEDocument $OLEDocument
+     * @param OLEDocument $ole
      * @param mixed $stream
      * @throws \Exception
      */
-    public function __construct($OLEDocument, $stream = null)
+    public function __construct($ole, $stream = null)
     {
-        $this->OLEDocument = $OLEDocument;
-        if (is_null($stream))
-            $this->streamid = $OLEDocument->GetDocumeantStream();
-        elseif (is_string($stream)) {
-            if (!$this->streamid = $this->OLEDocument->FindStreamByName($stream))
-                throw new \Exception("Stream {$stream} not found");
+        $this->ole = $ole;
+        if (is_null($stream)) {
+            $this->streamid = $ole->GetDocumeantStream();
         }
-        elseif (is_int($stream))
+        elseif (is_string($stream)) {
+            if (!$this->streamid = $this->ole->FindStreamByName($stream)) {
+                throw new \Exception("Stream {$stream} not found");
+            }
+        }
+        elseif (is_int($stream)) {
             $this->streamid = $stream;
-        else
+        }
+        else {
             throw new \Exception("Invalid stream {$stream}");
+        }
 
 
         // Use a closure/binding to access the internals of the OLE document -- simulating a C++ friend relationship
-        $initialize = function (OLEDocument $OLEDocument, $streamid,
-            &$startingsector, &$size, &$readsector, &$fat, &$blocksize) {
-            if ($OLEDocument->RootDir[$streamid]['ObjectType'] != 2)
+        $initialize = function (OLEDocument $ole, $streamid,
+                &$startingsector, &$size, &$readsector, &$fat, &$blocksize) {
+            if ($ole->RootDir[$streamid]['ObjectType'] != 2) {
                 throw new \Exception("Id {$streamid} is not a stream");
+            }
 
-            $startingsector = $OLEDocument->RootDir[$streamid]['StartingSector'];
-            $size = $OLEDocument->RootDir[$streamid]['StreamSize'];
+            $startingsector = $ole->RootDir[$streamid]['StartingSector'];
+            $size = $ole->RootDir[$streamid]['StreamSize'];
 
-            if ($size >= $OLEDocument->header['MiniStreamCutoff']) {
-                $readsector = \Closure::fromCallable([$OLEDocument, 'getSectorData']);
-                $fat = $OLEDocument->FAT;
-                $blocksize = $OLEDocument->blocksize;
+            if ($size >= $ole->header['MiniStreamCutoff']) {
+                $readsector = \Closure::fromCallable([$ole, 'getSectorData']);
+                $fat = $ole->FAT;
+                $blocksize = $ole->blocksize;
             }
             else {
-                $readsector = \Closure::fromCallable([$OLEDocument, 'getMiniSectorData']);
-                $fat = $OLEDocument->MiniFAT;
+                $readsector = \Closure::fromCallable([$ole, 'getMiniSectorData']);
+                $fat = $ole->MiniFAT;
                 $blocksize = 64;
             }
         };
 
-        $initialize = $initialize->bindTo($this, $OLEDocument);
-        $initialize($OLEDocument, $this->streamid, $this->startingsector, $this->size, $this->readsector, $this->fat, $this->blocksize);
+        $initialize = $initialize->bindTo($this, $ole);
+        $initialize($ole, $this->streamid, $this->startingsector, $this->size, $this->readsector, $this->fat, $this->blocksize);
 
         $this->fatpointer = $this->startingsector;
         $this->pos = 0;
@@ -77,7 +82,7 @@ class OLEStreamReader
      *
      * @param int $pos
      */
-    private function do_seek($pos)
+    private function doSeek($pos)
     {
         $oldsector = intdiv($this->pos, $this->blocksize);
         $newsector = intdiv($pos, $this->blocksize);
@@ -98,7 +103,7 @@ class OLEStreamReader
      *
      * @return boolean
      */
-    public function EOF()
+    public function eof()
     {
         return ($this->pos == $this->size);
     }
@@ -120,7 +125,7 @@ class OLEStreamReader
      * @param int $seektype
      * @return 0 on success or -1 if the seek would move the file pointer beyond the end of the stream
      */
-    public function Seek($pos, $seektype = SEEK_SET)
+    public function seek($pos, $seektype = SEEK_SET)
     {
         switch ($seektype) {
             case SEEK_SET:
@@ -149,7 +154,7 @@ class OLEStreamReader
      * Return the current file pointer position within the stream
      * @return int
      */
-    public function Tell()
+    public function tell()
     {
         return $this->pos;
     }
@@ -160,13 +165,15 @@ class OLEStreamReader
      * @param int $bytes
      * @return string
      */
-    public function Read($bytes)
+    public function read($bytes)
     {
-        if ($this->pos == $this->size)
+        if ($this->pos == $this->size) {
             return '';
+        }
 
-        if (is_null($this->buffer))
+        if (is_null($this->buffer)) {
             $this->buffer = ($this->readsector)($this->fatpointer);
+        }
 
         $sector_offset = $this->pos % $this->blocksize;
         if ($bytes <= $this->blocksize - $sector_offset) {
@@ -200,6 +207,36 @@ class OLEStreamReader
         }
 
         return $data;
+    }
+    
+    public function readUint1(): int
+    {
+        $s = $this->read(1);
+        if (!$s) {
+            throw new Exception('unable to read integer value');
+        }
+        
+        return ord($s[0]);
+    }
+    
+    public function readUint2(): int
+    {
+        $s = $this->read(2);
+        if (strlen($s) != 2) {
+            throw new Exception('unable to read integer value');
+        }
+        
+        return ord($s[0]) | (ord($s[1]) << 8);
+    }
+    
+    public function readUint4(): int
+    {
+        $s = $this->read(4);
+        if (strlen($s) != 4) {
+            throw new Exception('unable to read integer value');
+        }
+        
+        return ord($s[0]) | (ord($s[1]) << 8) | (ord($s[2]) << 16) | (ord($s[3]) << 24);
     }
 }
 

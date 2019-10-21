@@ -243,8 +243,15 @@ class MsPptDocument
     private $summaryInfo;
     private $docSummaryInfo;
     private $offsetToCurrentEdit;
+    private $persistDirectory;
     private $text = '';
-    
+    private $slideIds = [];
+    private $masterIds = [];
+    private $notesIds = [];
+    private $slides = [];
+    private $masters = [];
+    private $notes = [];
+
     public function __construct($file)
     {
         $this->oleDocument = new OLEDocument();
@@ -258,17 +265,17 @@ class MsPptDocument
             throw new \Exception("Must pass a file name or stream to PPT Document constructor");
         }
 
-        $this->streamId = $this->oleDocument->GetDocumentStream();
+        $this->streamId = $this->oleDocument->FindStreamByName('PowerPoint Document');
         $this->summaryStreamId = $this->oleDocument->FindStreamByName(chr(5) . 'SummaryInformation');
         $this->docinfoStreamId = $this->oleDocument->FindStreamByName(chr(5) . 'DocumentSummaryInformation');
         $this->docSummaryInfo = null;
         $this->summaryInfo = null;
         $this->stream = new OLEStreamReader($this->oleDocument, $this->streamId);
-        
+
         $this->readCurrentUserStream();
         $this->readDocumentStream();
     }
-    
+
     public function getDocumentSummary()
     {
         if (is_null($this->docSummaryInfo)) {
@@ -284,13 +291,13 @@ class MsPptDocument
         }
         return $this->summaryInfo;
     }
-    
+
     private function readRecordHeader($stream=null)
     {
         if (!$stream) {
             $stream = $this->stream;
         }
-    
+
         $rec = $stream->readUint2();
         $recType = $stream->readUint2();
         $recLen = $stream->readUint4();
@@ -301,7 +308,7 @@ class MsPptDocument
             'recLen' => $recLen,
         );
     }
-    
+
     private function skipRecord($stream=null)
     {
         if (!$stream) {
@@ -311,27 +318,27 @@ class MsPptDocument
         $h = $this->readRecordHeader($stream);
         $stream->seek($h[recLen], SEEK_CUR);
     }
-    
+
     private function readCurrentUserStream()
     {
         $currentUserStreamId = $this->oleDocument->FindStreamByName('Current User');
-        $stream = new OLEStreamReader($currentUserStreamId);
+        $stream = new OLEStreamReader($this->oleDocument, $currentUserStreamId);
         $h = $this->readRecordHeader($stream);
         if ($h['recType'] != self::RT_CURRENTUSERATOM) {
-            throw new Exception('Unexpected record type in User Stream');
+            throw new \Exception('Unexpected record type in User Stream');
         }
-        
+
         $size = $stream->readUint4();
         $headerToken = $stream->readUint4();
         $this->offsetToCurrentEdit = $stream->readUint4();
     }
-    
+
     private function readUserEditAtom($offset)
     {
         $this->stream->seek($offset);
         $h = $this->readRecordHeader();
         if ($h['recType'] != self::RT_USEREDITATOM) {
-            throw new Exception('Wrong record type for UserEditAtom');
+            throw new \Exception('Wrong record type for UserEditAtom');
         }
         $res = array();
         $res['lastSlideRef'] = $this->stream->readUint4();
@@ -341,7 +348,7 @@ class MsPptDocument
         $res['docPersistIdRef'] = $this->stream->readUint4();
         return $res;
     }
-    
+
     private function readPersistDirectoryAtom($offset)
     {
         $this->stream->seek($offset);
@@ -350,107 +357,332 @@ class MsPptDocument
         $res = array();
         while ($b < $h['recLen']) {
             $v = $this->stream->readUint4();
-            $persistID = ($v >> 12);
-            $cPersist = $v & bindec('111111111111');
-            $offsets = unpack('V' . cPersist, $this->stream->read(4 * cPersist));
-            
+            $persistID = ($v & 0xFFFFF);
+            $cPersist = ($v >> 20) & 0xFFF;
+            $offsets = unpack('V' . $cPersist, $this->stream->read(4 * $cPersist));
+
             // can't use array_merge for this because it renumbers numeric keys
             for ($i=0; $i < $cPersist; $i++) {
                 $res[$persistID+$i] = $offsets[$i+1];
-            }            
-            $this->appendPersistDirectory($res, $persistID, $cPersist, $offsets);
-            $b += 4 * (cPersist+1);
+            }
+            $b += 4 * ($cPersist+1);
         }
         return $res;
     }
-    
-    private function readDocumentAtom()
-    {
-        $atom = unpack('V1SlideSizeX/V1SlideSizeY/V1NotesSizeX/V1NotesSizeY/' . 
-                'P1ServerZoom/V1notesMasterPersistIdRef/V1handoutMasterPersistIdRef/' . 
-                'v1firstSlideNumber/v1slideSizeType/' . 
-                'c1fSaveWithFonts/c1fOmitTitlePlace/c1fRightToLeft/c1fShowComments');
-        $this->notesPersistID = $atom['notesMasterPersistIDRef'];
-        $this->handoutPersistID = $atom['handoutMasterPersistIDRef'];
-        return $atom;
-    }
-    
-    private function readExObjectList()
-    {
-        $this->skiprecord();
-    }
-    
-    private function readDocumentTextInfo()
-    {
-        $this->skiprecord();
-    }
-    
-    private function readSoundCollection()
-    {
-        $this->skiprecord();
-    }
-    
-    private function readDrawingGroup()
-    {
-        $this->skiprecord();
-    }
-    
-    private function readMasterList()
-    {
-        $this->skiprecord();
-    }
-    
-    private function readDocInfoList()
-    {
-        $this->skiprecord();
-    }
-    
-    private function readSlideHF()
-    {
-        $this->skiprecord();
-    }
-    
-    private function readNotesHF()
-    {
-        $this->skiprecord();
-    }
-    
-    private function readSlideListWithTextSubContainerOrAtom()
+
+    /* Slides, Masters */
+
+    private function readSlideAtom()
     {
         $h = $this->readRecordHeader();
-        switch ($h['recType']) {
-            case self::RT_TEXTCHARSATOM:
-                $s = mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'UTF-16LE') . '\n';
-                $this->text .= $s;
-                break;
-            case self::RT_TEXTBYTESATOM:
-                $s = mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'ASCII') . '\n';
-                $this->text .= $s;
-                break;
-            default:
-                $this->stream->seek($h['recLen'], SEEK_CUR);
-                break;
+        if ($h['recType'] != self::RT_SLIDEATOM || $h['recVer'] != 0x2) {
+            throw new \Exception('Wrong recType for DocumentContainer');
         }
-        return 8+$h['recLen'];
+        $slide = unpack('V1geom/c8rgPlaceholderTypes/V1masterIdRef/' .
+                'V1notesIdRef/v1slideFlags/v1unused', $this->stream->read(24));
+        return $slide;
     }
-    
-    private function readSlideList($recLen) 
+
+    private function readShapeGroupContainer($recLen)
+    {
+        $group = array();
+        $b = $recLen;
+        while ($b > 0) {
+            $h = $this->readRecordHeader();
+            if ($h['recType'] == 0xF003) {
+                $group[] = $this->readShapeGroupContainer($h['recLen']);
+            }
+            elseif ($h['recType'] == 0xF004) {
+                $group[] = $this->readShapeContainer($h['recLen']);
+            }
+            else {
+                break;
+            }
+            $b -= (8 + $h['recLen']);
+        }
+
+        return $group;
+    }
+
+    private function readTextClientDataSubContainerOrAtom($recLen)
+    {
+        $text = '';
+
+        $b = $recLen;
+        while ($b > 0) {
+            $h = $this->readRecordHeader();
+            switch ($h['recType']) {
+                case self::RT_OUTLINETEXTREFATOM:
+                case self::RT_TEXTHEADERATOM:
+                    $this->stream->seek($h['recLen'], SEEK_CUR);
+                    break;
+                case self::RT_TEXTCHARSATOM:
+                    $text .= mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'UTF-16LE') . "\r";
+                    break;
+                case self::RT_TEXTBYTESATOM:
+                    $text .= mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'ASCII') . "\r";
+                    break;
+                case self::RT_STYLETEXTPROPATOM:
+                case self::RT_SLIDENUMBERMETACHARATOM:
+                case self::RT_DATETIMEMETACHARATOM:
+                case self::RT_GENERICDATEMETACHARATOM:
+                case self::RT_HEADERMETACHARATOM:
+                case self::RT_FOOTERMETACHARATOM:
+                case self::RT_RTFDATETIMEMETACHARATOM:
+                case self::RT_TEXTBOOKMARKATOM:
+                case self::RT_TEXTSPECIALINFOATOM:
+                case self::RT_INTERACTIVEINFO:
+                case self::RT_TEXTINTERACTIVEINFOATOM:
+                case self::RT_TEXTRULERATOM:
+                case self::RT_MASTERTEXTPROPATOM:
+                default:
+                    $this->stream->seek($h['recLen'], SEEK_CUR);
+                    break;
+            }
+            $b -= (8 + $h['recLen']);
+        }
+        $this->text .= $text;
+        return $text;
+    }
+
+    private function readShapeContainer($recLen)
+    {
+        $shape = array();
+
+        $b = $recLen;
+        while ($b > 0) {
+            $h = $this->readRecordHeader();
+            switch ($h['recType']) {
+                case 0xF009: // shapeGroup
+                case 0xF00A: // shapeProp
+                case 0xF11D: // deletedShape
+                case 0xF00B: // shapePrimaryOptions
+                case 0xF121: // shapeSecondaryOptions1
+                case 0xF122: // shapeTertiaryOptions1
+                case 0xF00F: // childAnchor
+                case 0xF010: // clientAnchor
+                case 0xF011: // clientData
+                    $this->stream->seek($h['recLen'], SEEK_CUR);
+                    break;
+                case 0xF00D: // clientText
+                    $shape['clientText'] = $this->readTextClientDataSubContainerOrAtom($h['recLen']);
+                    break;
+                default:
+                    $this->stream->seek($h['recLen'], SEEK_CUR);
+                    break;
+            }
+            $b -= (8 + $h['recLen']);
+        }
+
+        return $shape;
+    }
+
+    private function readSlideDrawing(&$slide)
+    {
+        $h = $this->readRecordHeader();
+        if ($h['recType'] != 0xF002) {
+            throw new \Exception('Wrong recType for drawing container');
+        }
+        $b = $h['recLen'];
+
+        $h = $this->readRecordHeader();
+        if ($h['recType'] != 0xF008) {
+            throw new \Exception('Wrong recType for drawing container info');
+        }
+        $csp = $this->stream->readUint4();
+        $spidCur = $this->stream->readUint4();
+        $b -= 16;
+
+        $masterGroup = array();
+        while ($b > 0) {
+            $h = $this->readRecordHeader();
+            if ($h['recType'] == 0xF003) {
+                $masterGroup[] = $this->readShapeGroupContainer($h['recLen']);
+            }
+            elseif ($h['recType'] == 0xF004) {
+                $masterGroup[] = $this->readShapeContainer($h['recLen']);
+            }
+            else {
+                $this->stream->seek($h['recLen'], SEEK_CUR);
+            }
+            $b -= (8+$h['recLen']);
+        }
+        $slide['drawing'] = $masterGroup;
+    }
+
+    private function readSlideContainer($offset)
+    {
+        $this->stream->seek($offset);
+        $h = $this->readRecordHeader();
+        if (($h['recType'] != self::RT_SLIDE && $h['recType'] != self::RT_MAINMASTER) || $h['recVer'] != 0xF) {
+            throw new \Exception('Wrong recType for Slide or MainMaster Container');
+        }
+        $slide = $this->readSlideAtom();
+        $this->text .= "\n";
+
+        $b = $h['recLen'] - 32;
+        while ($b > 0) {
+            $h1 = $this->readRecordHeader();
+            switch ($h1['recType']) {
+                case self::RT_CSTRING: // slideNameAtom
+                    $slide['name'] = mb_convert_encoding($this->stream->read($h1['recLen']), 'UTF-8', 'UTF-16LE');
+                    $this->text .= "\n" . $slide['name'] . "\n";
+                    break;
+                case self::RT_DRAWING:
+                    $this->readSlideDrawing($slide);
+                    break;
+                case self::RT_HEADERSFOOTERS: //perSlideHFContainer
+                case self::RT_SLIDESHOWSLIDEINFOATOM:
+                case self::RT_ROUNDTRIPSLIDESYNCINFO12:
+                case self::RT_COLORSCHEMEATOM:
+                case self::RT_PROGTAGS:
+                default:
+                    $this->stream->seek($h1['recLen'], SEEK_CUR);
+            }
+            $b -= (8 + $h1['recLen']);
+        }
+
+        return $slide;
+    }
+
+    private function readSlides($idList, &$itemList)
+    {
+        foreach ($idList as $id => $persistId) {
+            $offset = $this->persistDirectory[$persistId];
+            $itemList[$id] = $this->readSlideContainer($offset);
+        }
+    }
+
+    /* Notes */
+
+    private function readNotesContainer($persistID)
+    {
+        if ($this->stream->seek($this->persistDirectory[$persistID]) != 0) {
+            return null;
+        }
+
+        $h = $this->readRecordHeader();
+        if ($h['recType'] != self::RT_NOTES || $h['recVer'] != 0xF) {
+            throw new \Exception('Invalid record type for Notes Container');
+        }
+        $b = $h['recLen'];
+
+        // Read the NotesAtom record
+        $h = $this->readRecordHeader();
+        if ($h['recType'] != self::RT_NOTESATOM || $h['recVer'] != 0x1) {
+            throw new \Exception('Mising Notes Atom in Notes Container');
+        }
+        $note = array();
+        $slideId = $this->stream->readUint4();
+        if ($slideId && isset($this->slides[$slideId])) {
+            $note['slide'] = $this->slides[$slideId];
+        }
+        $note['slideFlags'] = $this->stream->readUint4();
+        $this->stream->seek(2, SEEK_CUR);
+        $b -= 16;
+
+        while ($b > 0) {
+            $h = $this->readRecordHeader();
+            switch ($h['recType']) {
+                case self::RT_CSTRING: // slideNameAtom
+                    $note['name'] = mb_convert_encoding($this->stream->read($h1['recLen']), 'UTF-8', 'UTF-16LE');
+                    $this->text .= "\n" . $slide['name'] . "\n";
+                    break;
+                case self::RT_DRAWING:
+                    $this->readSlideDrawing($note);
+                    break;
+                case self::RT_COLORSCHEMEATOM:
+                case self::RT_PROGTAGS:
+                case self::RT_ROUNDTRIPTHEME12ATOM:
+                case self::RT_ROUNDTRIPCOLORMAPPING12ATOM:
+                case self::RT_ROUNDTRIPNOTESMASTERTEXTSTYLES12ATOM:
+                default:
+                    $this->seek($h['recLen'], SEEK_CUR);
+                    break;
+            }
+            $b -= (8 + $h['recLen']);
+        }
+
+        return $note;
+    }
+
+    private function ReadNotes()
+    {
+        foreach ($this->notesIds as $id => $persistId) {
+            $this->notes[$id] = $this->readNotesContainer($persistId);
+        }
+    }
+
+    /* Handout */
+
+    private function readHandoutContainer($persistId)
+    {
+        return null;
+    }
+
+    /* Document Container */
+
+    private function readDocumentAtom()
+    {
+        $atom = unpack('V1SlideSizeX/V1SlideSizeY/V1NotesSizeX/V1NotesSizeY/' .
+            'P1ServerZoom/V1notesMasterPersistIdRef/V1handoutMasterPersistIdRef/' .
+            'v1firstSlideNumber/v1slideSizeType/' .
+            'c1fSaveWithFonts/c1fOmitTitlePlace/c1fRightToLeft/c1fShowComments',
+            $this->stream->read(40));
+        $this->notesPersistID = $atom['notesMasterPersistIdRef'];
+        $this->handoutPersistID = $atom['handoutMasterPersistIdRef'];
+        return $atom;
+    }
+
+    private function readSlideList($recLen, $instance)
     {
         $b = $recLen;
         while ($b > 0) {
-            $b -= $this->readSlideListWithTextSubContainerOrAtom();
+            $h = $this->readRecordHeader();
+            switch ($h['recType']) {
+                case self::RT_SLIDEPERSISTATOM:
+                    $slidePersistId = $this->stream->readUint4();
+                    $this->stream->seek(8, SEEK_CUR); // A, B, C, reserved2, cTexts
+                    $slideId = $this->stream->readUint4();
+                    $this->stream->seek(4, SEEK_CUR); // reserved3
+
+                    switch ($instance) {
+                        case 0:
+                            $this->slideIds[$slideId] = $slidePersistId;
+                            break;
+                        case 1:
+                            $this->masterIds[$slideId] = $slidePersistId;
+                            break;
+                        case 2:
+                            $this->notesIds[$slideId] = $slidePersistId;
+                            break;
+                    }
+
+                    break;
+                case self::RT_TEXTCHARSATOM:
+                    $s = mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'UTF-16LE') . '\n';
+                    $this->text .= $s;
+                    break;
+                case self::RT_TEXTBYTESATOM:
+                    $s = mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'ASCII') . '\n';
+                    $this->text .= $s;
+                    break;
+                default:
+                    $this->stream->seek($h['recLen'], SEEK_CUR);
+                    break;
+            }
+            $b -= (8 + $h['recLen']);
         }
     }
-    
-    
+
     private function readDocumentContainer($offset)
     {
         $this->stream->seek($offset);
         $h = $this->readRecordHeader();
         if ($h['recType'] != self::RT_DOCUMENT || $h['recVer'] != 0xF) {
-            throw new Exception('Wrong recType for DocumentContainer');
+            throw new \Exception('Wrong recType for DocumentContainer');
         }
-        
+
         $b = $h['recLen'];
         while ($b > 0) {
             $h1 = $this->readRecordHeader();
@@ -458,8 +690,26 @@ class MsPptDocument
                 case self::RT_DOCUMENTATOM:
                     $this->readDocumentAtom();
                     break;
-                case self::RT_SLIDELISTWITHTEXT:
-                    $this->readSlideList();
+                case self::RT_EXTERNALOBJECTLIST:
+                case self::RT_ENVIRONMENT:
+                case self::RT_SOUNDCOLLECTION:
+                case self::RT_DRAWINGGROUP:
+                case self::RT_LIST: // docInfoList
+                case self::RT_HEADERSFOOTERS: // slideHF (instance=3), notesHF (instance=4)
+                    $this->stream->seek($h1['recLen'], SEEK_CUR);
+                    break;
+                case self::RT_SLIDELISTWITHTEXT: // slides (instance=0), masters (instance=1), notes (instance=2)
+                    $this->readSlideList($h1['recLen'], $h1['recInstance']);
+                    break;
+                case self::RT_SLIDESHOWDOCINFOATOM:
+                case self::RT_NAMEDSHOWS:
+                case self::RT_SUMMARY:
+                case self::RT_DOCROUTINGSLIPATOM:
+                case self::RT_PRINTOPTIONSATOM:
+                case self::RT_ROUNDTRIPCUSTOMTABLESTYLES12ATOM:
+                case self::RT_ENDDOCUMENTATOM:
+                default:
+                    $this->stream->seek($h1['recLen'], SEEK_CUR);
                     break;
             }
             $b -= (8+$h1['recLen']);
@@ -469,25 +719,44 @@ class MsPptDocument
     private function readDocumentStream()
     {
         $userEdit = $this->readUserEditAtom($this->offsetToCurrentEdit);
-        $docPersistID = $userEdit['docPersistIDRef'];
+        $docPersistID = $userEdit['docPersistIdRef'];
         $atoms = array();
         do {
             array_unshift($atoms, $this->readPersistDirectoryAtom($userEdit['offsetPersistDirectory']));
-                        
+
             if ($userEdit['offsetLastEdit'] != 0) {
                 $userEdit = $this->readUserEditAtom($userEdit['offsetLastEdit']);
             }
         } while ($userEdit['offsetLastEdit'] != 0);
-    
-        $this->persistDirectory = array();
+
+
         foreach ($atoms as $a) {
-            // can't use array_merge for this because it renumbers numeric keys
-            foreach ($a as $k => $v) {
-                $this->persistDirectory[$k] = $v;
+            if (!$this->persistDirectory) {
+                $this->persistDirectory = $a;
+            }
+            else {
+                // can't use array_merge for this because it renumbers numeric keys
+                foreach ($a as $k => $v) {
+                    $this->persistDirectory[$k] = $v;
+                }
             }
         }
-        
+
         $this->readDocumentContainer($this->persistDirectory[$docPersistID]);
+
+        if ($this->notesPersistID) {
+            $this->notesMaster = $this->readNotesContainer($this->notesPersistID);
+        }
+
+        if ($this->handoutPersistID) {
+            $this->handoutMaster = $this->readHandoutContainer($this->handoutPersistID);
+        }
+
+        $this->readSlides($this->masterIds, $this->masters);
+        $this->readSlides($this->slideIds, $this->slides);
+        $this->readNotes();
+
+        //$this->readExternalObjectList();
     }
 
     public function getText()

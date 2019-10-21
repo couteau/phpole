@@ -145,7 +145,7 @@ class OLEStreamReader
         }
 
         if ($pos != $this->pos)
-            $this->do_seek($pos);
+            $this->doSeek($pos);
 
         return 0;
     }
@@ -208,34 +208,34 @@ class OLEStreamReader
 
         return $data;
     }
-    
+
     public function readUint1(): int
     {
         $s = $this->read(1);
         if (!$s) {
-            throw new Exception('unable to read integer value');
+            throw new \Exception('unable to read integer value');
         }
-        
+
         return ord($s[0]);
     }
-    
+
     public function readUint2(): int
     {
         $s = $this->read(2);
         if (strlen($s) != 2) {
-            throw new Exception('unable to read integer value');
+            throw new \Exception('unable to read integer value');
         }
-        
+
         return ord($s[0]) | (ord($s[1]) << 8);
     }
-    
+
     public function readUint4(): int
     {
         $s = $this->read(4);
         if (strlen($s) != 4) {
-            throw new Exception('unable to read integer value');
+            throw new \Exception('unable to read integer value');
         }
-        
+
         return ord($s[0]) | (ord($s[1]) << 8) | (ord($s[2]) << 16) | (ord($s[3]) << 24);
     }
 }

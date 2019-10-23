@@ -383,27 +383,6 @@ class MsPptDocument
         return $slide;
     }
 
-    private function readShapeGroupContainer($recLen)
-    {
-        $group = array();
-        $b = $recLen;
-        while ($b > 0) {
-            $h = $this->readRecordHeader();
-            if ($h['recType'] == 0xF003) {
-                $group[] = $this->readShapeGroupContainer($h['recLen']);
-            }
-            elseif ($h['recType'] == 0xF004) {
-                $group[] = $this->readShapeContainer($h['recLen']);
-            }
-            else {
-                break;
-            }
-            $b -= (8 + $h['recLen']);
-        }
-
-        return $group;
-    }
-
     private function readTextClientDataSubContainerOrAtom($recLen)
     {
         $text = '';
@@ -445,7 +424,7 @@ class MsPptDocument
         return $text;
     }
 
-    private function readShapeContainer($recLen)
+    private function readOfficeArtSpContainer($recLen)
     {
         $shape = array();
 
@@ -477,7 +456,28 @@ class MsPptDocument
         return $shape;
     }
 
-    private function readSlideDrawing(&$slide)
+    private function readOfficeArtSpgrContainer($recLen)
+    {
+        $group = array();
+        $b = $recLen;
+        while ($b > 0) {
+            $h = $this->readRecordHeader();
+            if ($h['recType'] == 0xF003) {
+                $group[] = $this->readOfficeArtSpgrContainer($h['recLen']);
+            }
+            elseif ($h['recType'] == 0xF004) {
+                $group[] = $this->readOfficeArtSpContainer($h['recLen']);
+            }
+            else {
+                break;
+            }
+            $b -= (8 + $h['recLen']);
+        }
+
+        return $group;
+    }
+
+    private function readOfficeArtDgContainer(&$slide) // OfficeArtDgContainer 
     {
         $h = $this->readRecordHeader();
         if ($h['recType'] != 0xF002) {
@@ -485,29 +485,49 @@ class MsPptDocument
         }
         $b = $h['recLen'];
 
+        // OfficeArtFDG
         $h = $this->readRecordHeader();
         if ($h['recType'] != 0xF008) {
             throw new \Exception('Wrong recType for drawing container info');
         }
-        $csp = $this->stream->readUint4();
-        $spidCur = $this->stream->readUint4();
+        $csp = $this->stream->readUint4();     // number of shapes in the drawing
+        $spidCur = $this->stream->readUint4(); // id of last shapein drawing
         $b -= 16;
 
-        $masterGroup = array();
+        $shapeGroup = null;
+        $shape = null;
+        $deleted = array();
         while ($b > 0) {
             $h = $this->readRecordHeader();
-            if ($h['recType'] == 0xF003) {
-                $masterGroup[] = $this->readShapeGroupContainer($h['recLen']);
-            }
-            elseif ($h['recType'] == 0xF004) {
-                $masterGroup[] = $this->readShapeContainer($h['recLen']);
-            }
-            else {
-                $this->stream->seek($h['recLen'], SEEK_CUR);
+            switch ($h['recType']) {
+                case 0xF003: // groupShape
+                    if (!$shapeGroup && !$shape) {
+                        $shapeGroup = $this->readOfficeArtSpgrContainer($h['recLen']);
+                    }
+                    else {
+                        $deleted[] = $this->readOfficeArtSpgrContainer($h['recLen']);
+                    }
+                    break;
+                case 0xF004: // shape
+                    if (!$shape) {
+                        $shape = $this->readOfficeArtSpContainer($h['recLen']);
+                    }
+                    else {
+                        $deleted[] = $this->readOfficeArtSpContainer($h['recLen']);
+                    }
+                    break;
+                case 0xF118: // OfficeArtFRITContainer regroupItems
+                    $this->stream->seek($h['recLen'], SEEK_CUR);
+                    break;
+                case 0xF005: // OfficeArtSolverContainer solver1, solver2
+                    $this->stream->seek($h['recLen'], SEEK_CUR);
+                    break;
+                default:
+                    $this->stream->seek($h['recLen'], SEEK_CUR);
             }
             $b -= (8+$h['recLen']);
         }
-        $slide['drawing'] = $masterGroup;
+        $slide['drawing'] = ['shapeGroup' => $shapeGroup, 'shape' => $shape, 'deleted' => $deleted];
     }
 
     private function readSlideContainer($offset)
@@ -529,7 +549,7 @@ class MsPptDocument
                     $this->text .= "\n" . $slide['name'] . "\n";
                     break;
                 case self::RT_DRAWING:
-                    $this->readSlideDrawing($slide);
+                    $this->readOfficeArtDgContainer($slide);
                     break;
                 case self::RT_HEADERSFOOTERS: //perSlideHFContainer
                 case self::RT_SLIDESHOWSLIDEINFOATOM:

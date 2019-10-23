@@ -435,7 +435,12 @@ class OLEDocument
      */
     public function CreateFromStream($strm)
     {
+        if (!strm || !is_resource($strm) || get_resource_type($strm) !== 'stream') {
+            throw new \Exception("Invalid stream passed to OLEDocument::create");
+        }
+        
         $this->stream = $strm;
+        rewind($this->stream);
 
         $data = (binary)fread($strm, self::OLEHeaderSize);
         if (!$data) {

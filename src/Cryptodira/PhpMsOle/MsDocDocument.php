@@ -7,14 +7,14 @@ namespace Cryptodira\PhpMsOle;
  */
 class MsDocDocument
 {
-    /* @var \Cryptodira\PhpOffice\OLEDocument */
-    private $OLEDocument;
+    /** @var \Cryptodira\PhpOffice\OLEDocument */
+    private $oleDocument;
     private $streamid;
-    private $summarystreamid;
-    private $docinfostreamid;
+    private $summaryStreamId;
+    private $docinfoStreamId;
     private $fib;
-    private $summaryinfo;
-    private $docsummaryinfo;
+    private $summaryInfo;
+    private $docsummaryInfo;
 
     const FIBFormat =
     'v1wIdent/' .    # 00
@@ -84,42 +84,47 @@ class MsDocDocument
      */
     public function __construct($file)
     {
-        $this->OLEDocument = new OLEDocument();
-        if (is_string($file))
-            $this->OLEDocument->CreateFromFile($file);
-        elseif (is_resource($file) && get_resource_type($file) == 'stream')
-            $this->OLEDocument->CreateFromStream($file);
-        else
+        $this->oleDocument = new OLEDocument();
+        if (is_string($file)) {
+            $this->oleDocument->CreateFromFile($file);
+        }
+        elseif (is_resource($file) && get_resource_type($file) == 'stream') {
+            $this->oleDocument->CreateFromStream($file);
+        }
+        else {
             throw new \Exception("Must pass a file name or stream to Word97Document constructor");
+        }
 
-        $this->streamid = $this->OLEDocument->GetDocumentStream();
-        $this->summarystreamid = $this->OLEDocument->FindStreamByName(chr(5) . 'SummaryInformation');
-        $this->docinfostreamid = $this->OLEDocument->FindStreamByName(chr(5) . 'DocumentSummaryInformation');
-        $this->docsummaryinfo = null;
-        $this->summaryinfo = null;
+        $this->streamid = $this->oleDocument->GetDocumentStream();
+        $this->summaryStreamId = $this->oleDocument->FindStreamByName(chr(5) . 'SummaryInformation');
+        $this->docinfoStreamId = $this->oleDocument->FindStreamByName(chr(5) . 'DocumentSummaryInformation');
+        $this->docsummaryInfo = null;
+        $this->summaryInfo = null;
 
-        $data = $this->OLEDocument->Read($this->streamid, 154);
+        $data = $this->oleDocument->Read($this->streamid, 154);
         $this->fib = unpack(self::FIBFormat, $data);
     }
 
 
-    public function GetText()
+    public function getText()
     {
-        return $this->OLEDocument->Read($this->streamid, $this->fib['fcMax'], $this->fib['fcMin']);
+        return $this->oleDocument->Read($this->streamid, $this->fib['fcMax'], $this->fib['fcMin']);
     }
 
-    public function GetDocumentSummary()
+    public function getDocumentSummary()
     {
-        if (is_null($this->docsummaryinfo))
-            $this->docsummaryinfo = new PropertyBag($this->OLEDocument->Read($this->docinfostreamid));
-        return $this->docsummaryinfo;
+        if (is_null($this->docsummaryinfo)) {
+            $this->docsummaryInfo = new PropertyBag($this->oleDocument->Read($this->docinfoStreamId));
+        }
+        return $this->docsummaryInfo;
     }
 
-    public function GetSummaryInfo()
+    public function getSummaryInfo()
     {
-        if (is_null($this->summaryinfo))
-            $this->summaryinfo = new PropertyBag($this->OLEDocument->Read($this->summarystreamid));
-        return $this->summaryinfo;
+        if (is_null($this->summaryinfo)) {
+            $this->summaryInfo = new PropertyBag($this->oleDocument->Read($this->summaryStreamId));
+        }
+        return $this->summaryInfo;
     }
 }
 

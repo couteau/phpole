@@ -596,7 +596,15 @@ class MsPptDocument
             $h1 = $this->readRecordHeader();
             switch ($h1['recType']) {
                 case self::RT_CSTRING: // slideNameAtom
-                    $slide['name'] = mb_convert_encoding($this->stream->read($h1['recLen']), 'UTF-8', 'UTF-16LE');
+                    if ($h1['recInstance'] == 3) {
+                        $slide['name'] = mb_convert_encoding($this->stream->read($h1['recLen']), 'UTF-8', 'UTF-16LE');
+                    }
+                    elseif ($h1['recInstance'] == 2) {
+                        $slide['templateName'] = mb_convert_encoding($this->stream->read($h1['recLen']), 'UTF-8', 'UTF-16LE');
+                    }
+                    else {
+                        $this->stream->seek($h1['recLen'], SEEK_CUR);
+                    }
                     break;
                 case self::RT_DRAWING:
                     $this->readOfficeArtDgContainer($slide);
@@ -647,7 +655,7 @@ class MsPptDocument
         if ($h['recType'] != self::RT_NOTESATOM || $h['recVer'] != 0x1) {
             throw new \Exception('Mising Notes Atom in Notes Container');
         }
-        $note = array();
+        $note = array('name' => '', 'text' => '', 'footerText' => '');
         $slideId = $this->stream->readUint4();
         if ($slideId && isset($this->slides[$slideId])) {
             $note['slide'] = $this->slides[$slideId];
@@ -700,7 +708,7 @@ class MsPptDocument
             throw new \Exception('Invalid record type for Handout Container');
         }
         $b = $h['recLen'];
-        $handout = array();
+        $handout = array('name' => '', 'text' => '', 'footerText' => '');
         
         while ($b > 0) {
             $h = $this->readRecordHeader();
@@ -890,9 +898,10 @@ class MsPptDocument
             }
             
             foreach ($this->notes as $note) {
-                $this->text .= $slide['name'] ? $slide['name'] . "\n\n" : '' 
-                    . $slide['text'] . "\n\n" 
-                    . $slide['footerText'] ? $slide['footerText'] . "\n\n" : '';
+                $this->text .= $note['name'] ? $note['name'] . "\n\n" : ''
+                    . $note['headerText'] ? $note['headerText'] . "\n\n" : ''
+                    . $note['text'] . "\n\n" 
+                    . $note['footerText'] ? $note['footerText'] . "\n\n" : '';
             }
         }
         return $this->text;

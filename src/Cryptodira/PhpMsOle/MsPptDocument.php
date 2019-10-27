@@ -382,6 +382,58 @@ class MsPptDocument
                 'V1notesIdRef/v1slideFlags/v1unused', $this->stream->read(24));
         return $slide;
     }
+    
+    private function readHeaderFooter($instance)
+    {
+        $res = array(
+            'customDate' => '',
+            'headerText' => '',
+            'footerText' => '',
+        );
+        
+        // hfAtom
+        $h = $this->readRecordHeader();
+        if ($h['recType'] != self::RT_HEADERSFOOTERSATOM) {
+            throw new \Exception('Wrong recType for HeaderFooterAtom');
+        }
+        $formatID = $this->stream->readUint2();
+        $hfFlags = $this->stream->readUint2();
+        $fHasDate = $hfFlags & 0x8000;
+        $fHasTodayDate = $hfFlags & 0x4000;
+        $fHasUserDate = $hfFlags & 0x2000;
+        $fHasSlideNumber = $hfFlags & 0x1000;
+        $fHasHeader = $hfFlags & 0x0800;
+        $fHasFooter = $hfFlags & 0x0400;
+        
+         // userDate
+        if ($fHasUserDate) {
+            $h = $this->readRecordHeader();
+            if ($h['recType'] != self::RT_CSTRING) {
+                throw new \Exception('Wrong recType for user date');
+            }
+            $res['customDate'] = mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'UTF-16LE');
+        }
+        
+        // headerAtom
+        if ($instance == 0x04 && $fHasHeader) {
+            $h = $this->readRecordHeader();
+            if ($h['recType'] != self::RT_CSTRING) {
+                throw new \Exception('Wrong recType for header string');
+            }
+            $res['headerText'] = mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'UTF-16LE');                    
+        }
+
+        // footerAtom
+        if ($fHasFooter) {
+            $h = $this->readRecordHeader();
+            if ($h['recType'] != self::RT_CSTRING) {
+                throw new \Exception('Wrong recType for footer string');
+            }
+            $res['footerText'] = mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'UTF-16LE');                    
+        }
+        
+        return $res;
+    }
 
     private function readTextClientDataSubContainerOrAtom($recLen)
     {
@@ -538,7 +590,6 @@ class MsPptDocument
             throw new \Exception('Wrong recType for Slide or MainMaster Container');
         }
         $slide = $this->readSlideAtom();
-        $this->text .= "\n";
 
         $b = $h['recLen'] - 32;
         while ($b > 0) {
@@ -546,13 +597,17 @@ class MsPptDocument
             switch ($h1['recType']) {
                 case self::RT_CSTRING: // slideNameAtom
                     $slide['name'] = mb_convert_encoding($this->stream->read($h1['recLen']), 'UTF-8', 'UTF-16LE');
-                    $this->text .= "\n" . $slide['name'] . "\n";
                     break;
                 case self::RT_DRAWING:
                     $this->readOfficeArtDgContainer($slide);
                     break;
                 case self::RT_HEADERSFOOTERS: //perSlideHFContainer
+                    $hf = $this->readHeaderFooter($h1['recInstance']);
+                    $slide['customDate'] = $hf['customDate'];
+                    $slide['footerText'] = $hf['footerText'];
+                    break;
                 case self::RT_SLIDESHOWSLIDEINFOATOM:
+                case self::RT_TEXTMASTERSTYLEATOM:
                 case self::RT_ROUNDTRIPSLIDESYNCINFO12:
                 case self::RT_COLORSCHEMEATOM:
                 case self::RT_PROGTAGS:
@@ -606,10 +661,9 @@ class MsPptDocument
             switch ($h['recType']) {
                 case self::RT_CSTRING: // slideNameAtom
                     $note['name'] = mb_convert_encoding($this->stream->read($h1['recLen']), 'UTF-8', 'UTF-16LE');
-                    $this->text .= "\n" . $slide['name'] . "\n";
                     break;
                 case self::RT_DRAWING:
-                    $this->readSlideDrawing($note);
+                    $this->readOfficeArtDgContainer($note);
                     break;
                 case self::RT_COLORSCHEMEATOM:
                 case self::RT_PROGTAGS:
@@ -637,7 +691,38 @@ class MsPptDocument
 
     private function readHandoutContainer($persistId)
     {
-        return null;
+        if ($this->stream->seek($this->persistDirectory[$persistID]) != 0) {
+            return null;
+        }
+
+        $h = $this->readRecordHeader();
+        if ($h['recType'] != self::RT_HANDOUT || $h['recVer'] != 0xF) {
+            throw new \Exception('Invalid record type for Handout Container');
+        }
+        $b = $h['recLen'];
+        $handout = array();
+        
+        while ($b > 0) {
+            $h = $this->readRecordHeader();
+            switch ($h['recType']) {
+                case self::RT_CSTRING:
+                    $handout['name'] = mb_convert_encoding($this->stream->read($h1['recLen']), 'UTF-8', 'UTF-16LE');
+                    break;
+                case self::RT_DRAWING:
+                    $this->readOfficeArtDgContainer($handout);
+                    break;
+                case self::RT_COLORSCHEMEATOM:
+                case self::RT_PROGTAGS:
+                case self::RT_ROUNDTRIPTHEME12ATOM:
+                case self::RT_ROUNDTRIPCOLORMAPPING12ATOM:
+                case self::RT_ROUNDTRIPNOTESMASTERTEXTSTYLES12ATOM:
+                default:
+                    $this->stream->seek($h['recLen'], SEEK_CUR);
+                    break;
+            }
+        }
+        
+        return $handout;
     }
 
     /* Document Container */
@@ -681,11 +766,9 @@ class MsPptDocument
                     break;
                 case self::RT_TEXTCHARSATOM:
                     $s = mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'UTF-16LE') . '\n';
-                    $this->text .= $s;
                     break;
                 case self::RT_TEXTBYTESATOM:
                     $s = mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'ASCII') . '\n';
-                    $this->text .= $s;
                     break;
                 default:
                     $this->stream->seek($h['recLen'], SEEK_CUR);
@@ -716,7 +799,16 @@ class MsPptDocument
                 case self::RT_DRAWINGGROUP:
                 case self::RT_LIST: // docInfoList
                 case self::RT_HEADERSFOOTERS: // slideHF (instance=3), notesHF (instance=4)
-                    $this->stream->seek($h1['recLen'], SEEK_CUR);
+                    $hf = $this->readHeaderFooter($h1['recInstance']);
+                    if ($hf['recInstance'] == 0x03) {
+                        $this->customDate = $hf['customDate'];
+                        $this->slideFooter = $hf['footerText'];
+                    }
+                    else {
+                        $this->notesDate = $hf['customDate'];
+                        $this->notesHeader = $hf['headerText'];
+                        $this->notesFooter = $hf['footerText'];
+                    }
                     break;
                 case self::RT_SLIDELISTWITHTEXT: // slides (instance=0), masters (instance=1), notes (instance=2)
                     $this->readSlideList($h1['recLen'], $h1['recInstance']);
@@ -781,6 +873,28 @@ class MsPptDocument
 
     public function getText()
     {
+        if (!$this->text) {
+            $this->text = '';
+            foreach ($this->masters as $slide) {
+                $this->text .= $slide['name'] . "\n\n" . $slide['text'] . "\n\n" . $slide['footerText'] . "\n\n";
+            }
+            
+            foreach ($this->slides as $slide) {
+                $this->text .= $slide['name'] ? $slide['name'] . "\n\n" : '' 
+                    . $slide['text'] . "\n\n" 
+                    . $slide['footerText'] ? $slide['footerText'] . "\n\n" : '';
+            }
+            
+            if ($this->slideFooter) {
+                $this->text .= $this->slideFooter . "\n\n";
+            }
+            
+            foreach ($this->notes as $note) {
+                $this->text .= $slide['name'] ? $slide['name'] . "\n\n" : '' 
+                    . $slide['text'] . "\n\n" 
+                    . $slide['footerText'] ? $slide['footerText'] . "\n\n" : '';
+            }
+        }
         return $this->text;
     }
 }

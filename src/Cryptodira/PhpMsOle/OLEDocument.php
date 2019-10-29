@@ -375,7 +375,7 @@ class OLEDocument
         if ($streamid < 0 || $streamid >= sizeof($this->RootDir))
             throw new \Exception("Invalid StreamID $streamid");
 
-        if ($this->RootDir[$streamid]['ObjectType'] != 2 && $this->RootDir[$streamid]['ObjectType'] = 5)
+        if ($this->RootDir[$streamid]['ObjectType'] != 2 && $this->RootDir[$streamid]['ObjectType'] != 5)
             throw new \Exception("StreamID $streamid is not a stream");
 
         if ($offset > $this->RootDir[$streamid]['StreamSize'])

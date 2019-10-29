@@ -435,10 +435,10 @@ class OLEDocument
      */
     public function CreateFromStream($strm)
     {
-        if (!strm || !is_resource($strm) || get_resource_type($strm) !== 'stream') {
+        if (!$strm || !is_resource($strm) || get_resource_type($strm) !== 'stream') {
             throw new \Exception("Invalid stream passed to OLEDocument::create");
         }
-        
+
         $this->stream = $strm;
         rewind($this->stream);
 

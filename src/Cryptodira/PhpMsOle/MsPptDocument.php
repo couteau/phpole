@@ -382,7 +382,7 @@ class MsPptDocument
                 'V1notesIdRef/v1slideFlags/v1unused', $this->stream->read(24));
         return $slide;
     }
-    
+
     private function readHeaderFooter($instance)
     {
         $res = array(
@@ -390,7 +390,7 @@ class MsPptDocument
             'headerText' => '',
             'footerText' => '',
         );
-        
+
         // hfAtom
         $h = $this->readRecordHeader();
         if ($h['recType'] != self::RT_HEADERSFOOTERSATOM) {
@@ -398,13 +398,13 @@ class MsPptDocument
         }
         $formatID = $this->stream->readUint2();
         $hfFlags = $this->stream->readUint2();
-        $fHasDate = $hfFlags & 0x8000;
-        $fHasTodayDate = $hfFlags & 0x4000;
-        $fHasUserDate = $hfFlags & 0x2000;
-        $fHasSlideNumber = $hfFlags & 0x1000;
-        $fHasHeader = $hfFlags & 0x0800;
-        $fHasFooter = $hfFlags & 0x0400;
-        
+        $fHasDate = $hfFlags & 0x1;
+        $fHasTodayDate = $hfFlags & 0x2;
+        $fHasUserDate = $hfFlags & 0x4;
+        $fHasSlideNumber = $hfFlags & 0x8;
+        $fHasHeader = $hfFlags & 0x10;
+        $fHasFooter = $hfFlags & 0x20;
+
          // userDate
         if ($fHasUserDate) {
             $h = $this->readRecordHeader();
@@ -413,14 +413,14 @@ class MsPptDocument
             }
             $res['customDate'] = mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'UTF-16LE');
         }
-        
+
         // headerAtom
         if ($instance == 0x04 && $fHasHeader) {
             $h = $this->readRecordHeader();
             if ($h['recType'] != self::RT_CSTRING) {
                 throw new \Exception('Wrong recType for header string');
             }
-            $res['headerText'] = mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'UTF-16LE');                    
+            $res['headerText'] = mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'UTF-16LE');
         }
 
         // footerAtom
@@ -429,10 +429,108 @@ class MsPptDocument
             if ($h['recType'] != self::RT_CSTRING) {
                 throw new \Exception('Wrong recType for footer string');
             }
-            $res['footerText'] = mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'UTF-16LE');                    
+            $res['footerText'] = mb_convert_encoding($this->stream->read($h['recLen']), 'UTF-8', 'UTF-16LE');
         }
-        
+
         return $res;
+    }
+
+    private function readPP10BinaryTagExtension(&$shape)
+    {
+        $h = $this->readRecordHeader();
+        if ($h['recType'] != self::RT_BINARYTAGDATABLOB) {
+            throw new \Exception('Wrong record type for binary tag blob');
+        }
+
+        $b = $h['recLen'];
+        while ($b > 0) {
+            $h = $this->readRecordHeader();
+            switch ($h['recType']) {
+                case self::RT_TEXTMASTERSTYLE10ATOM:
+                case self::RT_COMMENT10:
+                case self::RT_LINKEDSLIDE10ATOM:
+                case self::RT_LINKEDSHAPE10ATOM:
+                case self::RT_SLIDEFLAGS10ATOM:
+                case self::RT_SLIDETIME10ATOM:
+                case self::RT_HASHCODEATOM:
+                case self::RT_TIMEEXTTIMENODECONTAINER:
+                case self::RT_BUILDLIST:
+                default:
+                    $this->stream->seek($h['recLen'], SEEK_CUR);
+                    break;
+            }
+            $b -= (8 + $h['recLen']);
+        }
+
+    }
+
+    private function readProgTagsContainer($recLen, &$shape)
+    {
+        $b = $recLen;
+        while ($b > 0) {
+            $h = $this->readRecordHeader();
+            switch ($h['recType']) {
+                case self::RT_PROGSTRINGTAG:
+                case self::RT_PROGBINARYTAG:
+                    $th = $this->readRecordHeader();
+                    if ($th['recType'] != self::RT_CSTRING) {
+                        throw new \Exception('ProgTag name must be CSTRING');
+                    }
+                    $name = mb_convert_encoding($this->stream->read($th['recLen']), 'UTF-8', 'UTF-16LE') . "\r";
+                    if ($h['recType'] == self::RT_PROGSTRINGTAG) {
+                        $th = $this->readRecordHeader();
+                        if ($th['recType'] != self::RT_CSTRING) {
+                         throw new \Exception('ProgTag value must be CSTRING');
+                            }
+                        $value = mb_convert_encoding($this->stream->read($th['recLen']), 'UTF-8', 'UTF-16LE') . "\r";
+                    }
+                    elseif ($name == '___PPT10') {
+                        $this->readPP10BinaryTagExtension($shape);
+                    }
+                    else {
+                        $this->stream->seek($h['recLen'] - (8+$th['recLen']), SEEK_CUR);
+                    }
+                    break;
+                default:
+                    throw new \Exception('This should never happen.');
+            }
+            $b -= (8 + $h['recLen']);
+        }
+    }
+
+    private function readOfficeArtClientData($recLen, &$shape)
+    {
+        $b = $recLen;
+        while ($b > 0) {
+            $h = $this->readRecordHeader();
+            switch ($h['recType']) {
+                case self::RT_SHAPEATOM:
+                case self::RT_SHAPEFLAGS10ATOM:
+                    $flags = $this->stream->readUint1();
+                    break;
+                case self::RT_EXTERNALOBJECTREFATOM:
+                    $exObjID = $this->stream->readUint4();
+                    break;
+                case self::RT_ANIMATIONINFO:
+                case self::RT_INTERACTIVEINFO:
+                    $this->stream->seek($h['recLen'], SEEK_CUR);
+                    break;
+                case self::RT_PLACEHOLDERATOM:
+                    $position = $this->stream->readUint4();
+                    $placementId = $this->stream->readUint1();
+                    $size = $this->stream->readUint1();
+                    $this->stream->seek(2, SEEK_CUR);
+                    break;
+                case self::RT_PROGTAGS:
+                    $this->readProgTagsContainer($h['recLen'], $shape);
+                    break;
+                case self::RT_RECOLORINFOATOM:
+                default:
+                    $this->stream->seek($h['recLen'], SEEK_CUR);
+                    break;
+            }
+            $b -= (8 + $h['recLen']);
+        }
     }
 
     private function readTextClientDataSubContainerOrAtom($recLen)
@@ -472,8 +570,28 @@ class MsPptDocument
             }
             $b -= (8 + $h['recLen']);
         }
-        $this->text .= $text;
         return $text;
+    }
+
+    private function readOptions($numProps, &$shape)
+    {
+        $dataOffset = $this->stream->tell() + $numProps * 6;
+        for ($i = 0; $i < $numProps; $i++) {
+            $opid = $this->stream->readUint2();
+            $fBid = $opid & 0x4000;
+            $fComplex = $opid & 0x8000;
+            $opid &= 0x3FFF;
+            $op = $this->stream->readUint4();
+            if ($op && $fComplex) {
+                $pos = $this->stream->tell();
+                $this->stream->seek($dataOffset);
+                $s = $this->stream->read($op);
+                $dataOffset += $op;
+                $this->stream->seek($pos);
+            }
+        }
+        // by the end, this should point to the end of the property array + data
+        $this->stream->seek($dataOffset);
     }
 
     private function readOfficeArtSpContainer($recLen)
@@ -485,15 +603,38 @@ class MsPptDocument
             $h = $this->readRecordHeader();
             switch ($h['recType']) {
                 case 0xF009: // shapeGroup
+                    $this->stream->seek($h['recLen'], SEEK_CUR);
+                    break;
                 case 0xF00A: // shapeProp
-                case 0xF11D: // deletedShape
+                    $shape['id'] = $this->stream->readUint4();
+                    $shapeProps = $this->stream->readUint4();
+                    $fGroup = $shapeProps & 0x1;
+                    $fChild = $shapeProps & 0x2;
+                    $fPatriarch = $shapeProps & 0x4;
+                    $fDeleted = $shapeProps & 0x8;
+                    $fOleShape = $shapeProps & 0x10;
+                    $fHaveMaster = $shapeProps & 0x20;
+                    $fFlipH = $shapeProps & 0x40;
+                    $fFlipV = $shapeProps & 0x80;
+                    $fConnector = $shapeProps & 0x100;
+                    $fHaveAnchor = $shapeProps & 0x200;
+                    $fBackground = $shapeProps & 0x400;
+                    $fHaveSpt = $shapeProps & 0x800;
+                    break;
                 case 0xF00B: // shapePrimaryOptions
                 case 0xF121: // shapeSecondaryOptions1
                 case 0xF122: // shapeTertiaryOptions1
+                    $pos = $this->stream->tell();
+                    $this->readOptions($h['recInstance'], $shape);
+                    $this->stream->seek($pos + $h['recLen']);
+                    break;
+                case 0xF11D: // deletedShape
                 case 0xF00F: // childAnchor
                 case 0xF010: // clientAnchor
-                case 0xF011: // clientData
                     $this->stream->seek($h['recLen'], SEEK_CUR);
+                    break;
+                case 0xF011: // clientData
+                    $this->readOfficeArtClientData($h['recLen'], $shape);
                     break;
                 case 0xF00D: // clientText
                     $shape['clientText'] = $this->readTextClientDataSubContainerOrAtom($h['recLen']);
@@ -529,7 +670,7 @@ class MsPptDocument
         return $group;
     }
 
-    private function readOfficeArtDgContainer(&$slide) // OfficeArtDgContainer 
+    private function readOfficeArtDgContainer(&$slide) // OfficeArtDgContainer
     {
         $h = $this->readRecordHeader();
         if ($h['recType'] != 0xF002) {
@@ -545,6 +686,7 @@ class MsPptDocument
         $csp = $this->stream->readUint4();     // number of shapes in the drawing
         $spidCur = $this->stream->readUint4(); // id of last shapein drawing
         $b -= 16;
+        $text = '';
 
         $shapeGroup = null;
         $shape = null;
@@ -555,6 +697,11 @@ class MsPptDocument
                 case 0xF003: // groupShape
                     if (!$shapeGroup && !$shape) {
                         $shapeGroup = $this->readOfficeArtSpgrContainer($h['recLen']);
+                        foreach ($shapeGroup as $s) {
+                            if (isset($s['clientText'])) {
+                                $text .= $s['clientText'] . "\r";
+                            }
+                        }
                     }
                     else {
                         $deleted[] = $this->readOfficeArtSpgrContainer($h['recLen']);
@@ -563,6 +710,9 @@ class MsPptDocument
                 case 0xF004: // shape
                     if (!$shape) {
                         $shape = $this->readOfficeArtSpContainer($h['recLen']);
+                        if (isset($shape['clientText'])) {
+                            $text .= $shape['clientText'] . "\r";
+                        }
                     }
                     else {
                         $deleted[] = $this->readOfficeArtSpContainer($h['recLen']);
@@ -579,17 +729,20 @@ class MsPptDocument
             }
             $b -= (8+$h['recLen']);
         }
+
+        $slide['text'] = $text;
         $slide['drawing'] = ['shapeGroup' => $shapeGroup, 'shape' => $shape, 'deleted' => $deleted];
     }
 
-    private function readSlideContainer($offset)
+    private function readSlideContainer($persistId)
     {
-        $this->stream->seek($offset);
+        $this->stream->seek($this->persistDirectory[$persistId]);
         $h = $this->readRecordHeader();
         if (($h['recType'] != self::RT_SLIDE && $h['recType'] != self::RT_MAINMASTER) || $h['recVer'] != 0xF) {
             throw new \Exception('Wrong recType for Slide or MainMaster Container');
         }
-        $slide = $this->readSlideAtom();
+        $slide = array_merge($this->readSlideAtom(),
+            ['name' => '', 'text' => '', 'footerText' => '']);
 
         $b = $h['recLen'] - 32;
         while ($b > 0) {
@@ -614,11 +767,13 @@ class MsPptDocument
                     $slide['customDate'] = $hf['customDate'];
                     $slide['footerText'] = $hf['footerText'];
                     break;
+                case self::RT_PROGTAGS:
+                    $this->readProgTagsContainer($h1['recLen'], $slide);
+                    break;
                 case self::RT_SLIDESHOWSLIDEINFOATOM:
                 case self::RT_TEXTMASTERSTYLEATOM:
                 case self::RT_ROUNDTRIPSLIDESYNCINFO12:
                 case self::RT_COLORSCHEMEATOM:
-                case self::RT_PROGTAGS:
                 default:
                     $this->stream->seek($h1['recLen'], SEEK_CUR);
             }
@@ -631,8 +786,7 @@ class MsPptDocument
     private function readSlides($idList, &$itemList)
     {
         foreach ($idList as $id => $persistId) {
-            $offset = $this->persistDirectory[$persistId];
-            $itemList[$id] = $this->readSlideContainer($offset);
+            $itemList[$id] = $this->readSlideContainer($persistId);
         }
     }
 
@@ -673,8 +827,10 @@ class MsPptDocument
                 case self::RT_DRAWING:
                     $this->readOfficeArtDgContainer($note);
                     break;
-                case self::RT_COLORSCHEMEATOM:
                 case self::RT_PROGTAGS:
+                    $this->readProgTagsContainer($h['recLen'], $slide);
+                    break;
+                case self::RT_COLORSCHEMEATOM:
                 case self::RT_ROUNDTRIPTHEME12ATOM:
                 case self::RT_ROUNDTRIPCOLORMAPPING12ATOM:
                 case self::RT_ROUNDTRIPNOTESMASTERTEXTSTYLES12ATOM:
@@ -699,7 +855,7 @@ class MsPptDocument
 
     private function readHandoutContainer($persistId)
     {
-        if ($this->stream->seek($this->persistDirectory[$persistID]) != 0) {
+        if ($this->stream->seek($this->persistDirectory[$persistId]) != 0) {
             return null;
         }
 
@@ -709,7 +865,7 @@ class MsPptDocument
         }
         $b = $h['recLen'];
         $handout = array('name' => '', 'text' => '', 'footerText' => '');
-        
+
         while ($b > 0) {
             $h = $this->readRecordHeader();
             switch ($h['recType']) {
@@ -719,8 +875,10 @@ class MsPptDocument
                 case self::RT_DRAWING:
                     $this->readOfficeArtDgContainer($handout);
                     break;
-                case self::RT_COLORSCHEMEATOM:
                 case self::RT_PROGTAGS:
+                    $this->readProgTagsContainer($h['recLen'], $slide);
+                    break;
+                case self::RT_COLORSCHEMEATOM:
                 case self::RT_ROUNDTRIPTHEME12ATOM:
                 case self::RT_ROUNDTRIPCOLORMAPPING12ATOM:
                 case self::RT_ROUNDTRIPNOTESMASTERTEXTSTYLES12ATOM:
@@ -728,8 +886,9 @@ class MsPptDocument
                     $this->stream->seek($h['recLen'], SEEK_CUR);
                     break;
             }
+            $b -= (8 + $h['recLen']);
         }
-        
+
         return $handout;
     }
 
@@ -802,13 +961,17 @@ class MsPptDocument
                     $this->readDocumentAtom();
                     break;
                 case self::RT_EXTERNALOBJECTLIST:
+                    $this->stream->seek($h1['recLen'], SEEK_CUR);
+                    break;
                 case self::RT_ENVIRONMENT:
                 case self::RT_SOUNDCOLLECTION:
                 case self::RT_DRAWINGGROUP:
                 case self::RT_LIST: // docInfoList
+                    $this->stream->seek($h1['recLen'], SEEK_CUR);
+                    break;
                 case self::RT_HEADERSFOOTERS: // slideHF (instance=3), notesHF (instance=4)
                     $hf = $this->readHeaderFooter($h1['recInstance']);
-                    if ($hf['recInstance'] == 0x03) {
+                    if ($h1['recInstance'] == 0x03) {
                         $this->customDate = $hf['customDate'];
                         $this->slideFooter = $hf['footerText'];
                     }
@@ -884,24 +1047,27 @@ class MsPptDocument
         if (!$this->text) {
             $this->text = '';
             foreach ($this->masters as $slide) {
-                $this->text .= $slide['name'] . "\n\n" . $slide['text'] . "\n\n" . $slide['footerText'] . "\n\n";
+                $this->text .= ($slide['name'] ? $slide['name'] . "\n\n" : '')
+                    . ($slide['templateName'] ? $slide['templateName'] . "\n\n" : '')
+                    . $slide['text'] . "\n\n"
+                    . ($slide['footerText'] ? $slide['footerText'] . "\n\n" : '');
             }
-            
+
             foreach ($this->slides as $slide) {
-                $this->text .= $slide['name'] ? $slide['name'] . "\n\n" : '' 
-                    . $slide['text'] . "\n\n" 
-                    . $slide['footerText'] ? $slide['footerText'] . "\n\n" : '';
+                $this->text .= ($slide['name'] ? $slide['name'] . "\n\n" : '')
+                    . $slide['text'] . "\n\n"
+                    . ($slide['footerText'] ? $slide['footerText'] . "\n\n" : '');
             }
-            
+
             if ($this->slideFooter) {
                 $this->text .= $this->slideFooter . "\n\n";
             }
-            
+
             foreach ($this->notes as $note) {
-                $this->text .= $note['name'] ? $note['name'] . "\n\n" : ''
-                    . $note['headerText'] ? $note['headerText'] . "\n\n" : ''
-                    . $note['text'] . "\n\n" 
-                    . $note['footerText'] ? $note['footerText'] . "\n\n" : '';
+                $this->text .= ($note['name'] ? $note['name'] . "\n\n" : '')
+                    . ($note['headerText'] ? $note['headerText'] . "\n\n" : '')
+                    . $note['text'] . "\n\n"
+                    . ($note['footerText'] ? $note['footerText'] . "\n\n" : '');
             }
         }
         return $this->text;

@@ -11,7 +11,7 @@ namespace Cryptodira\PhpMsOle;
  * @author Stuart C. Naifeh <stuart@cryptodira.org>
  *
  */
-class OLEDocument implements \IteratorAggregate, \Countable, \ArrayAccess
+class OLEDocument extends OLEStorage
 {
 
     /**
@@ -65,14 +65,6 @@ class OLEDocument implements \IteratorAggregate, \Countable, \ArrayAccess
      * @var array
      */
     private $MiniFAT;
-
-    /**
-     * Array of directory entries in the root directory structure
-     * Each entry is an array with entries corresponding to the OLEDocument::OLEDirectoryEntryFormat format string
-     *
-     * @var array
-     */
-    private $RootDir;
 
     // Special FAT entry values
     const MAXREGSECT = 0xFFFFFFFA;
@@ -159,6 +151,7 @@ class OLEDocument implements \IteratorAggregate, \Countable, \ArrayAccess
     public function __construct()
     {
         $this->stream = null;
+        parent::__construct($this);
     }
 
     /**
@@ -177,6 +170,15 @@ class OLEDocument implements \IteratorAggregate, \Countable, \ArrayAccess
         if ($this->stream)
             fclose($this->stream);
         $this->stream = null;
+    }
+
+    public function getNextSector($sector)
+    {
+        if ($sector & 0xFFFFFFF8 !== 0xFFFFFFF8) {
+            return $this->FAT[$sector];
+        } else {
+            return $sector;
+        }
     }
 
     /**
@@ -256,40 +258,13 @@ class OLEDocument implements \IteratorAggregate, \Countable, \ArrayAccess
     }
 
     /**
-     * Read directory entries from a directory information sector and add them to an existing
-     * array, if passed.
-     * Return an array containing the directory entries.
-     *
-     * @param int $sector
-     * @param array $entries
-     * @return string|string[]
-     */
-    private function ReadDirectorySector($sector, &$entries = null)
-    {
-        $data = $this->getSectorData($sector);
-
-        if (!$entries)
-            $entries = array();
-
-        for ($i = 0; $i < $this->blocksize / 128; $i++) {
-            $newentry = unpack(self::OLEDirectoryEntryFormat, $data, $i * self::OLEDirectoryEntrySize);
-            // unpack cuts off the final byte of the final UTF-16LE character if it is null, so we have to add it back on
-            if (strlen($newentry['EntryName']) % 2 != 0)
-                $newentry['EntryName'] .= chr(0);
-            $newentry['EntryName'] = mb_convert_encoding($newentry['EntryName'], "UTF-8", "UTF-16LE");
-            $entries[] = $newentry;
-        }
-        return $entries;
-    }
-
-    /**
      * Read the root director for the OLE file
      */
     private function ReadRootDirectory()
     {
         $s = $this->header['FirstDirectorySector'];
         while ($s != self::ENDOFCHAIN) {
-            $this->ReadDirectorySector($s, $this->RootDir);
+            $this->ReadDirectorySector($s, $this->entries);
             $s = $this->FAT[$s];
         }
     }
@@ -302,9 +277,9 @@ class OLEDocument implements \IteratorAggregate, \Countable, \ArrayAccess
      */
     private function GetStream($streamid)
     {
-        if ($this->RootDir[$streamid]['ObjectType'] != 2)
+        if ($this->entries[$streamid]['ObjectType'] != 2)
             return null; // should this throw an error?
-        $s = $this->RootDir[$streamid]['StartingSector'];
+        $s = $this->entries[$streamid]['StartingSector'];
         $data = '';
         while ($s != self::ENDOFCHAIN) {
             $data .= $this->getSectorData($s);
@@ -321,7 +296,7 @@ class OLEDocument implements \IteratorAggregate, \Countable, \ArrayAccess
      */
     public function GetRootDirCount()
     {
-        return sizeof($this->RootDir);
+        return count($this->entries);
     }
 
     /**
@@ -331,8 +306,8 @@ class OLEDocument implements \IteratorAggregate, \Countable, \ArrayAccess
      */
     public function GetDocumentStream()
     {
-        for ($i = 1; $i < sizeof($this->RootDir); $i++) {
-            if ($this->RootDir[$i]['ObjectType'] == 2 && $this->RootDir[$i]['StartingSector'] == 0)
+        for ($i = 1; $i < sizeof($this->entries); $i++) {
+            if ($this->entries[$i]['ObjectType'] == 2 && $this->entries[$i]['StartingSector'] == 0)
                 return $i;
         }
 
@@ -348,8 +323,8 @@ class OLEDocument implements \IteratorAggregate, \Countable, \ArrayAccess
     public function FindStreamByName($stream_name)
     {
         // could use the red/black tree to do this more quickly
-        for ($i = 1; $i < sizeof($this->RootDir); $i++) {
-            if ($this->RootDir[$i]['EntryName'] == $stream_name)
+        for ($i = 1; $i < sizeof($this->entries); $i++) {
+            if ($this->entries[$i]['EntryName'] == $stream_name)
                 return $i;
         }
 
@@ -367,20 +342,20 @@ class OLEDocument implements \IteratorAggregate, \Countable, \ArrayAccess
      */
     public function Read($streamid, $bytes = -1, $offset = 0)
     {
-        if ($streamid < 0 || $streamid >= sizeof($this->RootDir))
+        if ($streamid < 0 || $streamid >= sizeof($this->entries))
             throw new \Exception("Invalid StreamID $streamid");
 
-        if ($this->RootDir[$streamid]['ObjectType'] != 2 && $this->RootDir[$streamid]['ObjectType'] != 5)
+        if ($this->entries[$streamid]['ObjectType'] != 2 && $this->entries[$streamid]['ObjectType'] != 5)
             throw new \Exception("StreamID $streamid is not a stream");
 
-        if ($offset > $this->RootDir[$streamid]['StreamSize'])
+        if ($offset > $this->entries[$streamid]['StreamSize'])
             throw new \Exception("Attempt to read past end of stream");
 
         // $bytes = -1 means read the whole stream
         if ($bytes == -1)
-            $bytes = $this->RootDir[$streamid]['StreamSize'];
+            $bytes = $this->entries[$streamid]['StreamSize'];
 
-        if ($streamid == 0 || $this->RootDir[$streamid]['StreamSize'] >= $this->header['MiniStreamCutoff']) {
+        if ($streamid == 0 || $this->entries[$streamid]['StreamSize'] >= $this->header['MiniStreamCutoff']) {
             $readsector = array(
                 $this,
                 'getSectorData'
@@ -397,7 +372,7 @@ class OLEDocument implements \IteratorAggregate, \Countable, \ArrayAccess
         }
 
         // first find the sector containing the starting offset
-        $s = $this->RootDir[$streamid]['StartingSector'];
+        $s = $this->entries[$streamid]['StartingSector'];
         $i = 0;
         while ($s != self::ENDOFCHAIN && $i < $offset) {
             if ($offset < $i + $bs)
@@ -501,36 +476,6 @@ class OLEDocument implements \IteratorAggregate, \Countable, \ArrayAccess
     {
         $strm = fopen('php://temp,' . $fdata);
         return $this->CreateFromStream($strm);
-    }
-
-    public function getIterator()
-    {
-        return new \ArrayIterator($this->RootDir);
-    }
-
-    public function count()
-    {
-        return count($this->RootDir);
-    }
-
-    public function offsetGet($offset)
-    {
-        return $this->RootDir[$offset];
-    }
-
-    public function offsetExists($offset)
-    {
-        return $offset >= 0 && $offset < count($this->RootDir);
-    }
-
-    public function offsetUnset($offset)
-    {
-        throw new \BadMethodCallException('Cannot unset OLEDocument directory entries');
-    }
-
-    public function offsetSet($offset, $value)
-    {
-        throw new \BadMethodCallException('Cannot set OLEDocument directory entries');
     }
 }
 

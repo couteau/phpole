@@ -267,11 +267,7 @@ class OLEDocument extends OLEStorage
      */
     private function ReadRootDirectory()
     {
-        $s = $this->header['FirstDirectorySector'];
-        while ($s != self::ENDOFCHAIN) {
-            $this->ReadDirectorySector($s, $this->entries);
-            $s = $this->FAT[$s];
-        }
+        $this->readStorage($this->header['FirstDirectorySector']);
     }
 
     /**

@@ -19,7 +19,7 @@ class OLEStorage implements \IteratorAggregate, \Countable, \ArrayAccess
 
     private $root;
 
-    private $blocksize;
+    private $bs;
 
     /**
      */
@@ -37,8 +37,13 @@ class OLEStorage implements \IteratorAggregate, \Countable, \ArrayAccess
             throw new \Exception("Id {$streamid} is not a storage");
         }
 
-        $this->blocksize = $this->root->getBlocksize();
-        $s = $this->root[$streamid]['StartingSector'];
+        $this->readStorage($this->root[$streamid]['StartingSector']);
+    }
+
+    protected function readStorage(int $sector)
+    {
+        $this->bs = $this->root->getBlocksize();
+        $s = $sector;
 
         while ($s != self::ENDOFCHAIN) {
             $this->readDirectorySector($s);
@@ -58,7 +63,7 @@ class OLEStorage implements \IteratorAggregate, \Countable, \ArrayAccess
     protected function readDirectorySector($sector)
     {
         $data = $this->root->getSectorData($sector);
-        for ($i = 0; $i < $this->blocksize / 128; $i++) {
+        for ($i = 0; $i < $this->bs / 128; $i++) {
             $newentry = unpack(OLEDocument::OLEDirectoryEntryFormat, $data, $i * OLEDocument::OLEDirectoryEntrySize);
             // unpack cuts off the final byte of the final UTF-16LE character if it is null, so we have to add it back on
             if (strlen($newentry['EntryName']) % 2 != 0)

@@ -172,6 +172,11 @@ class OLEDocument extends OLEStorage
         $this->stream = null;
     }
 
+    public function getBlocksize()
+    {
+        return $this->blocksize;
+    }
+
     public function getNextSector($sector)
     {
         if ($sector & 0xFFFFFFF8 !== 0xFFFFFFF8) {

@@ -19,6 +19,8 @@ class OLEStorage implements \IteratorAggregate, \Countable, \ArrayAccess
 
     private $root;
 
+    private $blocksize;
+
     /**
      */
     public function __construct(OLEDocument $root, $streamid = null)
@@ -35,6 +37,7 @@ class OLEStorage implements \IteratorAggregate, \Countable, \ArrayAccess
             throw new \Exception("Id {$streamid} is not a storage");
         }
 
+        $this->blocksize = $this->root->getBlocksize();
         $s = $this->root[$streamid]['StartingSector'];
 
         while ($s != self::ENDOFCHAIN) {

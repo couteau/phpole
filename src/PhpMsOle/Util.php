@@ -1,5 +1,5 @@
 <?php
-namespace Cryptodira\PhpMsOle\Util;
+namespace Cryptodira\PhpMsOle;
 
 $CODEPAGE = 1252;
 
@@ -7,7 +7,7 @@ const mb_encodings = array(
     1200 => 'UTF-16LE',
     1201 => 'UTF-16BE',
     1251 => 'CP1251',
-    1252 => 'CP1252',
+    1252 => 'CP1252'
 );
 
 const iconv_encodings = array(
@@ -40,13 +40,13 @@ const iconv_encodings = array(
     50227 => 'ISO-2022-CN',
     50229 => 'ISO-2022-CN-EXT',
     65000 => 'UTF-8',
-    65001 => 'UTF-7',
+    65001 => 'UTF-7'
 );
 
 function ror($c, $bits)
 {
     $b = str_pad(decbin(ord($c) & 0xFF), 8, '0', STR_PAD_LEFT);
-    $b = substr($b, 8 - $bits, $bits) . substr($b, 0, 8-$bits);
+    $b = substr($b, 8 - $bits, $bits) . substr($b, 0, 8 - $bits);
     return chr(bindec($b));
 }
 
@@ -63,16 +63,14 @@ function ConvertEncoding($str, $codepage = null)
         $out = iconv(iconv_encodings[$codepage], 'UTF-8//TRANSLIT', $str);
         if (!$out)
             $out = iconv(iconv_encodings[$codepage], 'UTF-8//IGNORE', $str);
-    }
-    elseif ($codepage >= 437 && $codepage <= 1258) {
+    } elseif ($codepage >= 437 && $codepage <= 1258) {
         $cp = 'CP' . $codepage;
         $out = iconv($cp, 'UTF-8//TRANSLIT', $str);
         if (!$out)
             $out = iconv($cp, 'UTF-8//IGNORE', $str);
         if (!$out)
             $out = $str;
-    }
-    else
+    } else
         $out = $str;
 
     return rtrim($out, "\0");
@@ -89,13 +87,13 @@ function ReadUnicodeString($buffer, $offset, &$bytesread)
     return mb_convert_encoding($str, 'UTF-8', 'UTF-16LE');
 }
 
-function ReadCodePageString($buffer, $offset, &$bytesread, $codepage=null)
+function ReadCodePageString($buffer, $offset, &$bytesread, $codepage = null)
 {
     $size = unpack('V1', $buffer, $offset)[1];
     if ($size == 0)
         return '';
 
-    $str = substr($buffer, $offset+4, $size);
+    $str = substr($buffer, $offset + 4, $size);
     $bytesread = 4 + $size;
     return ConvertEncoding($str, $codepage);
 }

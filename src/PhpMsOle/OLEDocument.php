@@ -11,8 +11,9 @@ namespace Cryptodira\PhpMsOle;
  * @author Stuart C. Naifeh <stuart@cryptodira.org>
  *
  */
-class OLEDocument
+class OLEDocument implements \IteratorAggregate, \Countable, \ArrayAccess
 {
+
     /**
      * File descriptor for underlying data store
      *
@@ -58,7 +59,6 @@ class OLEDocument
      */
     private $FAT;
 
-
     /**
      * OLE file allocation table for the mini-stream
      *
@@ -75,21 +75,29 @@ class OLEDocument
     private $RootDir;
 
     // Special FAT entry values
-    const MAXREGSECT    = 0xFFFFFFFA;
-    const DIFSECT       = 0xFFFFFFFC;
-    const FATSECT       = 0xFFFFFFFD;
-    const ENDOFCHAIN    = 0xFFFFFFFE;
-    const FREESECT      = 0xFFFFFFFF;
+    const MAXREGSECT = 0xFFFFFFFA;
+
+    const DIFSECT = 0xFFFFFFFC;
+
+    const FATSECT = 0xFFFFFFFD;
+
+    const ENDOFCHAIN = 0xFFFFFFFE;
+
+    const FREESECT = 0xFFFFFFFF;
 
     // Special stream ID values
-    const MAXREGSID     = 0xFFFFFFFA;
-    const NOSTREAM      = 0xFFFFFFFF;
+    const MAXREGSID = 0xFFFFFFFA;
+
+    const NOSTREAM = 0xFFFFFFFF;
 
     // Directory entry types
-    const UnkownObject	     = 0x00;
-    const StorageObject	     = 0x01;
-    const StreamObject	     = 0x02;
-    const RootStorageObject	 = 0x05;
+    const UnkownObject = 0x00;
+
+    const StorageObject = 0x01;
+
+    const StreamObject = 0x02;
+
+    const RootStorageObject = 0x05;
 
     // Size of the OLE header record
     const OLEHeaderSize = 0x200;
@@ -119,55 +127,42 @@ class OLEDocument
     const OLEV4DIFATSectorFormat = 'V1023FATSectors/V1NextDIFATSector';
 
     // Unpack() format string for the OLE Header
-    const OLEHeaderFormat =
-    'H16Signature/' .            # 00 8 bytes
-    'H32CLSID/' .                # 08 16 bytes
-    'v1MinorVersion/' .          # 18 2 bytes
-    'v1MajorVersion/' .          # 1A 2 bytes
-    'v1ByteOrder/' .             # 1C 2 bytes
-    'v1SectorShift/' .           # 1E 2 bytes
-    'v1MiniSectorShift/' .       # 20 2 bytes
-    'Z6Reserved1/' .             # 22 6 bytes
-    'V1DirectorySectors/' .      # 28 4 bytes
-    'V1FATSectors/' .            # 2C 4 bytes
-    'V1FirstDirectorySector/' .  # 30 4 bytes
-    'V1TransactionSignature/' .  # 34 4 bytes
-    'V1MiniStreamCutoff/' .      # 38 4 bytes
-    'V1FirstMiniFATSector/' .    # 3C 4 bytes
-    'V1MiniFATSectorCount/' .    # 40 4 bytes
-    'V1FirstDIFATSector/' .      # 44 4 bytes
-    'V1DIFATSectorCount/' .      # 48 4 bytes
-    'V109DIFAT';                 # 4C 436 bytes
+    const OLEHeaderFormat = 'H16Signature/' . # 00 8 bytes
+    'H32CLSID/' . # 08 16 bytes
+    'v1MinorVersion/' . # 18 2 bytes
+    'v1MajorVersion/' . # 1A 2 bytes
+    'v1ByteOrder/' . # 1C 2 bytes
+    'v1SectorShift/' . # 1E 2 bytes
+    'v1MiniSectorShift/' . # 20 2 bytes
+    'Z6Reserved1/' . # 22 6 bytes
+    'V1DirectorySectors/' . # 28 4 bytes
+    'V1FATSectors/' . # 2C 4 bytes
+    'V1FirstDirectorySector/' . # 30 4 bytes
+    'V1TransactionSignature/' . # 34 4 bytes
+    'V1MiniStreamCutoff/' . # 38 4 bytes
+    'V1FirstMiniFATSector/' . # 3C 4 bytes
+    'V1MiniFATSectorCount/' . # 40 4 bytes
+    'V1FirstDIFATSector/' . # 44 4 bytes
+    'V1DIFATSectorCount/' . # 48 4 bytes
+    'V109DIFAT';
+
+    # 4C 436 bytes
 
     // Unpack() format string for a single directory entry
-    const OLEDirectoryEntryFormat =
-    'A64EntryName/' .
-    'v1EntryNameLength/' .
-    'C1ObjectType/' .
-    'C1ColorFlag/' .
-    'V1LeftSiblingID/' .
-    'V1RightSiblingID/' .
-    'V1ChildID/' .
-    'H32CLSID/' .
-    'V1StateBits/' .
-    'P1CreationTime/' .
-    'P1ModifiedTime/' .
-    'V1StartingSector/' .
-    'P1StreamSize/';
+    const OLEDirectoryEntryFormat = 'A64EntryName/' . 'v1EntryNameLength/' . 'C1ObjectType/' . 'C1ColorFlag/' .
+            'V1LeftSiblingID/' . 'V1RightSiblingID/' . 'V1ChildID/' . 'H32CLSID/' . 'V1StateBits/' . 'P1CreationTime/' .
+            'P1ModifiedTime/' . 'V1StartingSector/' . 'P1StreamSize/';
 
     /**
-     *  Initialize a new OLEDocument structure
-     *
+     * Initialize a new OLEDocument structure
      */
     public function __construct()
     {
         $this->stream = null;
     }
 
-
     /**
-     *  Dispose of internal resources
-     *
+     * Dispose of internal resources
      */
     public function __destruct()
     {
@@ -176,7 +171,6 @@ class OLEDocument
 
     /**
      * Close the underlying file resource and reset the internal structures
-     *
      */
     public function Close()
     {
@@ -211,11 +205,11 @@ class OLEDocument
      */
     public function getMiniSectorData($sector)
     {
-        return $this->Read(0,64,$sector * 64);
+        return $this->Read(0, 64, $sector * 64);
     }
 
     /**
-     *  Load the entire FAT into $this->FAT
+     * Load the entire FAT into $this->FAT
      */
     private function ReadFAT()
     {
@@ -232,9 +226,9 @@ class OLEDocument
         while ($s != self::ENDOFCHAIN) {
             $data = $this->getSectorData($s);
             $difat = unpack($this->DIFAT_sectorformat, $data);
-            $difat['FATSectors'] = array_values(array_splice($difat, 0, sizeof($difat)-1));
+            $difat['FATSectors'] = array_values(array_splice($difat, 0, sizeof($difat) - 1));
 
-            for ($i = 0; $i < $this->blocksize/4 - 1; $i++) {
+            for ($i = 0; $i < $this->blocksize / 4 - 1; $i++) {
                 if ($difat['FATSectors'][$i] == self::ENDOFCHAIN)
                     return;
                 $data = $this->getSectorData($this->header['DIFAT'][$i]);
@@ -247,7 +241,7 @@ class OLEDocument
     }
 
     /**
-     *  Load the entire MiniFAT into $this->MiniFAT
+     * Load the entire MiniFAT into $this->MiniFAT
      */
     private function ReadMiniFAT()
     {
@@ -263,7 +257,8 @@ class OLEDocument
 
     /**
      * Read directory entries from a directory information sector and add them to an existing
-     * array, if passed. Return an array containing the directory entries.
+     * array, if passed.
+     * Return an array containing the directory entries.
      *
      * @param int $sector
      * @param array $entries
@@ -276,7 +271,7 @@ class OLEDocument
         if (!$entries)
             $entries = array();
 
-        for ($i = 0; $i < $this->blocksize/128; $i++) {
+        for ($i = 0; $i < $this->blocksize / 128; $i++) {
             $newentry = unpack(self::OLEDirectoryEntryFormat, $data, $i * self::OLEDirectoryEntrySize);
             // unpack cuts off the final byte of the final UTF-16LE character if it is null, so we have to add it back on
             if (strlen($newentry['EntryName']) % 2 != 0)
@@ -308,7 +303,7 @@ class OLEDocument
     private function GetStream($streamid)
     {
         if ($this->RootDir[$streamid]['ObjectType'] != 2)
-            return null; //should this throw an error?
+            return null; // should this throw an error?
         $s = $this->RootDir[$streamid]['StartingSector'];
         $data = '';
         while ($s != self::ENDOFCHAIN) {
@@ -386,12 +381,17 @@ class OLEDocument
             $bytes = $this->RootDir[$streamid]['StreamSize'];
 
         if ($streamid == 0 || $this->RootDir[$streamid]['StreamSize'] >= $this->header['MiniStreamCutoff']) {
-            $readsector = array($this, 'getSectorData');
+            $readsector = array(
+                $this,
+                'getSectorData'
+            );
             $fat = $this->FAT;
             $bs = $this->blocksize;
-        }
-        else {
-            $readsector = array($this, 'getMiniSectorData');
+        } else {
+            $readsector = array(
+                $this,
+                'getMiniSectorData'
+            );
             $fat = $this->MiniFAT;
             $bs = 64;
         }
@@ -409,7 +409,6 @@ class OLEDocument
         // grab from the starting offset to the end of the starting sector
         $data = substr($readsector($s), $offset - $i, $bs - ($offset % $bs));
 
-
         // keep adding sectors until we've got all the bytes requested
         if ($s != self::ENDOFCHAIN) {
             $s = $fat[$s];
@@ -421,7 +420,7 @@ class OLEDocument
 
         // If the last sector read added more bytes than requested, truncate the returned data
         if (strlen($data) > $bytes)
-            return substr($data,0,$bytes);
+            return substr($data, 0, $bytes);
         else
             return $data;
     }
@@ -442,7 +441,7 @@ class OLEDocument
         $this->stream = $strm;
         rewind($this->stream);
 
-        $data = (binary)fread($strm, self::OLEHeaderSize);
+        $data = (string) fread($strm, self::OLEHeaderSize);
         if (!$data) {
             throw new \Exception("Could not read header block");
         }
@@ -452,7 +451,7 @@ class OLEDocument
             throw new \Exception("Stream is not an OLE file");
         }
 
-        $this->header['DIFAT'] = array_values(array_splice($this->header,-109,109));
+        $this->header['DIFAT'] = array_values(array_splice($this->header, -109, 109));
         switch ($this->header['MajorVersion']) {
             case 0x03:
                 $this->blocksize = 512;
@@ -502,6 +501,36 @@ class OLEDocument
     {
         $strm = fopen('php://temp,' . $fdata);
         return $this->CreateFromStream($strm);
+    }
+
+    public function getIterator()
+    {
+        return new \ArrayIterator($this->RootDir);
+    }
+
+    public function count()
+    {
+        return count($this->RootDir);
+    }
+
+    public function offsetGet($offset)
+    {
+        return $this->RootDir[$offset];
+    }
+
+    public function offsetExists($offset)
+    {
+        return $offset >= 0 && $offset < count($this->RootDir);
+    }
+
+    public function offsetUnset($offset)
+    {
+        throw new \BadMethodCallException('Cannot unset OLEDocument directory entries');
+    }
+
+    public function offsetSet($offset, $value)
+    {
+        throw new \BadMethodCallException('Cannot set OLEDocument directory entries');
     }
 }
 

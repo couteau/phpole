@@ -1,78 +1,68 @@
 <?php
-namespace Cryptodira\PhpMsOle;
+namespace Cryptodira\PhpOle;
 
 /**
- * File-like structure for rading from an individual stream within an OLE compound document
+ * File-like structure for rading from an individual stream within an Ole compound document
  *
  * @author Stuart C. Naifeh <stuart@cryptodira.org>
  *
  */
-class OLEStreamReader
+class OleStream extends OleEntry
 {
-    /** @var OLEDocument $ole*/
-    private $ole;
-    private $streamid;
-    private $startingsector;
+
     private $fat;
+
     private $blocksize;
+
     private $readsector;
-    private $size;
+
     private $fatpointer;
+
+    private $firstblock;
+
     private $buffer;
+
+    private $size;
+
     private $pos;
 
     /**
-     * Create a new OLE stream reader for a given stream within an OLE compound document
+     * Create a new Ole stream reader for a given stream within an Ole compound document
      *
-     * @param OLEDocument $ole
+     * @param OleDocument $root
      * @param mixed $stream
      * @throws \Exception
      */
-    public function __construct($ole, $stream = null)
+    public function __construct($root, $stream = null)
     {
-        $this->ole = $ole;
-        if (is_null($stream)) {
-            $this->streamid = $ole->GetDocumeantStream();
-        }
-        elseif (is_string($stream)) {
-            if (!$this->streamid = $this->ole->FindStreamByName($stream)) {
-                throw new \Exception("Stream {$stream} not found");
-            }
-        }
-        elseif (is_int($stream)) {
-            $this->streamid = $stream;
-        }
-        else {
-            throw new \Exception("Invalid stream {$stream}");
-        }
+        parent::__construct($root, $stream);
 
+        $this->firstblock = $this->entry['StartingBlock'];
+        $this->size = $this->entry['StreamSize'];
 
-        // Use a closure/binding to access the internals of the OLE document -- simulating a C++ friend relationship
-        $initialize = function (OLEDocument $ole, $streamid,
-                &$startingsector, &$size, &$readsector, &$fat, &$blocksize) {
-            if ($ole->RootDir[$streamid]['ObjectType'] != 2) {
-                throw new \Exception("Id {$streamid} is not a stream");
-            }
-
-            $startingsector = $ole->RootDir[$streamid]['StartingSector'];
-            $size = $ole->RootDir[$streamid]['StreamSize'];
-
-            if ($size >= $ole->header['MiniStreamCutoff']) {
-                $readsector = \Closure::fromCallable([$ole, 'getSectorData']);
-                $fat = $ole->FAT;
-                $blocksize = $ole->blocksize;
-            }
-            else {
-                $readsector = \Closure::fromCallable([$ole, 'getMiniSectorData']);
-                $fat = $ole->MiniFAT;
+        // Use a closure/binding to access the internals of the Ole document -- simulating a C++ friend relationship
+        $initialize = function (OleDocument $root, $size, &$readsector, &$fat, &$blocksize) {
+            if ($size >= $root->header['MiniStreamCutoff']) {
+                $readsector = \Closure::fromCallable([
+                    $root,
+                    'getBlockData'
+                ]);
+                $fat = $root->FAT;
+                $blocksize = $root->blocksize;
+            } else {
+                $readsector = \Closure::fromCallable([
+                    $root,
+                    'getMiniBlockData'
+                ]);
+                $fat = $root->MiniFAT;
                 $blocksize = 64;
             }
         };
 
-        $initialize = $initialize->bindTo($this, $ole);
-        $initialize($ole, $this->streamid, $this->startingsector, $this->size, $this->readsector, $this->fat, $this->blocksize);
+        $initialize = $initialize->bindTo($this, $root);
+        $initialize($root, $this->size, $this->readsector, $this->fat, $this->blocksize);
 
-        $this->fatpointer = $this->startingsector;
+        $this->fatpointer = $this->firstblock;
         $this->pos = 0;
         $this->buffer = null;
     }
@@ -88,8 +78,8 @@ class OLEStreamReader
         $newsector = intdiv($pos, $this->blocksize);
 
         if ($newsector != $oldsector) {
-            $this->fatpointer = $this->startingsector;
-            for ($i=0; $i<$newsector && $this->fatpointer != OLEDocument::ENDOFCHAIN; $i++)
+            $this->fatpointer = $this->firstblock;
+            for ($i = 0; $i < $newsector && $this->fatpointer != OleDocument::ENDOFCHAIN; $i++)
                 $this->fatpointer = $this->fat[$this->fatpointer];
 
             $this->buffer = null;
@@ -111,10 +101,10 @@ class OLEStreamReader
     /**
      * Reset the file pointer to the beginning of the stream
      */
-    public function Rewind()
+    public function rewind()
     {
         $this->buffer = null;
-        $this->fatpointer = $this->startingsector;
+        $this->fatpointer = $this->firstblock;
         $this->pos = 0;
     }
 
@@ -123,7 +113,7 @@ class OLEStreamReader
      *
      * @param int $pos
      * @param int $seektype
-     * @return 0 on success or -1 if the seek would move the file pointer beyond the end of the stream
+     * @return int - 0 on success or -1 if the seek would move the file pointer beyond the end of the stream
      */
     public function seek($pos, $seektype = SEEK_SET)
     {
@@ -152,6 +142,7 @@ class OLEStreamReader
 
     /**
      * Return the current file pointer position within the stream
+     *
      * @return int
      */
     public function tell()
@@ -165,10 +156,14 @@ class OLEStreamReader
      * @param int $bytes
      * @return string
      */
-    public function read($bytes)
+    public function read($bytes = null)
     {
         if ($this->pos == $this->size) {
             return '';
+        }
+
+        if ($bytes === null) {
+            $bytes = $this->size - $this->pos;
         }
 
         if (is_null($this->buffer)) {
@@ -183,20 +178,18 @@ class OLEStreamReader
                 $this->fatpointer = $this->fat[$this->fatpointer];
                 $this->buffer = null;
             }
-        }
-        else {
+        } else {
             $data = substr($this->buffer, $sector_offset);
             $this->buffer = null;
             $bytesread = $this->blocksize - $sector_offset;
             $this->fatpointer = $this->fat[$this->fatpointer];
-            while ($this->fatpointer != OLEDocument::ENDOFCHAIN && $bytesread < $bytes) {
+            while ($this->fatpointer != OleDocument::ENDOFCHAIN && $bytesread < $bytes) {
                 if (($bytes - $bytesread) < $this->blocksize) {
                     $this->buffer = ($this->readsector)($this->fatpointer);
-                    $data .= substr($this->buffer, 0, $bytes-$bytesread);
+                    $data .= substr($this->buffer, 0, $bytes - $bytesread);
                     $bytesread = $bytes;
                     break;
-                }
-                else {
+                } else {
                     $data .= ($this->readsector)($this->fatpointer);
                     $bytesread += $this->blocksize;
                 }

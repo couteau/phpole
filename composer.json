@@ -1,30 +1,32 @@
 {
-	"name" : "cryptodira/phpmsole",
-	"type" : "library",
-	"description" : "Native PHP manipulation of Microsoft OLE compound files",
-	"license" : "GPL-3.0+",
-	"keywords" : [
-		"Microsoft Office OLE"
+	"name": "cryptodira/phpole",
+	"type": "library",
+	"description": "Native PHP manipulation of Microsoft OLE compound files",
+	"license": "GPL-3.0+",
+	"keywords": [
+		"Microsoft OLE"
 	],
-	"autoload" : {
-		"psr-4" : {
-			"Cryptodira\\" : "src/"
-		},
-		"psr-0" : {
-			"Cryptodira\\" : "src/"
+	"autoload": {
+		"files": [
+			"src/OleUtil.php",
+			"src/OleConst.php"
+		],
+		"psr-4": {
+			"Cryptodira\\PhpOle\\": "src/",
+			"Cryptodira\\PhpOle\\Tests\\": "tests/"
 		}
 	},
-	"require" : {
-		"php" : ">=7.3",
-		"phpseclib/phpseclib" : "~2.0"
+	"require": {
+		"php": ">=7.3"
 	},
-	"require-dev" : {
-		"phpunit/phpunit" : "^8.2"
+	"require-dev": {
+		"phpunit/phpunit": "^8.2"
 	},
-	"authors" : [{
-			"name" : "Stuart C. Naifeh",
-			"email" : "stuart@cryptodira.org"
+	"authors": [
+		{
+			"name": "Stuart C. Naifeh",
+			"email": "stuart@cryptodira.org"
 		}
 	],
-	"minimum-stability" : "stable"
+	"minimum-stability": "stable"
 }

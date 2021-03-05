@@ -1,5 +1,5 @@
 <?php
-namespace Cryptodira\PhpMsOle;
+namespace Cryptodira\PhpOle;
 
 $CODEPAGE = 1252;
 

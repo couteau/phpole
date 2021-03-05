@@ -1,7 +1,1 @@
-.project
-.buildpath
-/.settings/
-composer.phar
-/vendor/
-/nbproject/private/
-composer.lock
+/vendor

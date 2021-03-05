@@ -140,7 +140,7 @@ abstract class OlePropertyBag implements \ArrayAccess
      * @param int $type
      * @return mixed
      */
-    protected function ReadPropertyValue($data, &$offset, $type = null)
+    protected function readPropertyValue($data, &$offset, $type = null)
     {
         if (!$type || $type == VT_VARIANT) {
             $type = unpack(self::PropertyValueFormat, $data, $offset)['Type'];
@@ -196,13 +196,13 @@ abstract class OlePropertyBag implements \ArrayAccess
             case VT_BSTR:
             case VT_LPSTR:
                 $bytesread = 0;
-                $value = ReadCodePageString($data, $offset, $bytesread, $this->codepage);
+                $value = ole_read_codepage_string($data, $offset, $bytesread, $this->codepage);
                 // $offset += $bytesread + ((4 - ($value['Size'] % 4) % 4));
                 $offset += $bytesread; // Padding to 4 byte boundary doesn't seem to be happening notwithstanding the spec
                 break;
             case VT_LPWSTR:
                 $bytesread = 0;
-                $value = ReadUnicodeString($data, $offset, $bytesread);
+                $value = ole_read_unicode_string($data, $offset, $bytesread);
                 $offset += $bytesread;
                 break;
             case VT_FILETIME:
@@ -235,7 +235,7 @@ abstract class OlePropertyBag implements \ArrayAccess
                     $value = array();
                     $offset += 4;
                     for ($i = 0; $i < $size; $i++)
-                        $value[] = $this->ReadPropertyValue($data, $offset, $type & 0xFFF);
+                        $value[] = $this->readPropertyValue($data, $offset, $type & 0xFFF);
                 } else if ($type & VT_ARRAY)
                     $value = null; // Not supporting Arrays for now
                 else

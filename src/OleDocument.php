@@ -277,7 +277,7 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
      */
     public function getMiniBlockData($block)
     {
-        return $this->Read(0, 64, $block * 64);
+        return $this->read(0, 64, $block * 64);
     }
 
     /**
@@ -598,10 +598,10 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
                 throw new \Exception("Invalid BlockShift");
         }
 
-        $this->ReadFAT();
-        $this->ReadMiniFAT();
-        $this->ReadFileSpecs();
-        $this->ReadRootDirectory();
+        $this->readFAT();
+        $this->readMiniFAT();
+        $this->readFileSpecs();
+        $this->readRootDirectory();
         return $this;
     }
 

@@ -1,5 +1,4 @@
 <?php
-namespace Cryptodira\PhpOle;
 
 $CODEPAGE = 1252;
 
@@ -50,7 +49,7 @@ function ror($c, $bits)
     return chr(bindec($b));
 }
 
-function ConvertEncoding($str, $codepage = null)
+function ole_convert_encoding($str, $codepage = null)
 {
     global $CODEPAGE;
 
@@ -76,7 +75,7 @@ function ConvertEncoding($str, $codepage = null)
     return rtrim($out, "\0");
 }
 
-function ReadUnicodeString($buffer, $offset, &$bytesread)
+function ole_read_unicode_string($buffer, $offset, &$bytesread)
 {
     $size = unpack('V1', $buffer, $offset)[1];
     if ($size == 0)
@@ -87,7 +86,7 @@ function ReadUnicodeString($buffer, $offset, &$bytesread)
     return mb_convert_encoding($str, 'UTF-8', 'UTF-16LE');
 }
 
-function ReadCodePageString($buffer, $offset, &$bytesread, $codepage = null)
+function ole_read_codepage_string($buffer, $offset, &$bytesread, $codepage = null)
 {
     $size = unpack('V1', $buffer, $offset)[1];
     if ($size == 0)
@@ -95,5 +94,5 @@ function ReadCodePageString($buffer, $offset, &$bytesread, $codepage = null)
 
     $str = substr($buffer, $offset + 4, $size);
     $bytesread = 4 + $size;
-    return ConvertEncoding($str, $codepage);
+    return ole_convert_encoding($str, $codepage);
 }

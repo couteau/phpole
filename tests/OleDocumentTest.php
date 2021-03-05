@@ -16,7 +16,7 @@ class OleDocumentTest extends TestCase
      *
      * @var OLEDocument
      */
-    private $oLEDocument;
+    private $oleDocument;
 
     /**
      * Prepares the environment before running a test.
@@ -25,7 +25,7 @@ class OleDocumentTest extends TestCase
     {
         parent::setUp();
 
-        $this->oLEDocument = new OLEDocument(__DIR__ . '/../samples/DOCS-#602483-v1-PPP_Compliance_Survey.doc');
+        $this->oleDocument = new OLEDocument(__DIR__ . '/../samples/TestWordDoc.doc');
     }
 
     /**
@@ -33,7 +33,7 @@ class OleDocumentTest extends TestCase
      */
     protected function tearDown(): void
     {
-        $this->oLEDocument = null;
+        $this->oleDocument = null;
 
         parent::tearDown();
     }
@@ -43,7 +43,7 @@ class OleDocumentTest extends TestCase
      */
     public function testClose()
     {
-        $this->oLEDocument->close();
+        $this->oleDocument->close();
     }
 
     /**
@@ -51,7 +51,7 @@ class OleDocumentTest extends TestCase
      */
     public function testGetRootStorage()
     {
-        $storage = $this->oLEDocument->getRootStorage();
+        $storage = $this->oleDocument->getRootStorage();
         $this->assertIsObject($storage);
         $this->assertInstanceOf(OLEStorage::class, $storage);
     }
@@ -64,7 +64,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testGetRootStorageCount()
         $this->markTestIncomplete("getRootStorageCount test not implemented");
 
-        $this->oLEDocument->getRootStorageCount(/* parameters */);
+        $this->oleDocument->getRootStorageCount(/* parameters */);
     }
 
     /**
@@ -72,7 +72,7 @@ class OleDocumentTest extends TestCase
      */
     public function testGetBlocksize()
     {
-        $blocksize = $this->oLEDocument->getBlocksize();
+        $blocksize = $this->oleDocument->getBlocksize();
         $this->assertEquals(512, $blocksize);
     }
 
@@ -84,7 +84,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testGetNextBlock()
         $this->markTestIncomplete("getNextBlock test not implemented");
 
-        $this->oLEDocument->getNextBlock(0);
+        $this->oleDocument->getNextBlock(0);
     }
 
     /**
@@ -95,7 +95,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testGetBlockData()
         $this->markTestIncomplete("getBlockData test not implemented");
 
-        $this->oLEDocument->getBlockData(0);
+        $this->oleDocument->getBlockData(0);
     }
 
     /**
@@ -106,7 +106,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testGetMiniBlockData()
         $this->markTestIncomplete("getMiniBlockData test not implemented");
 
-        $this->oLEDocument->getMiniBlockData(0);
+        $this->oleDocument->getMiniBlockData(0);
     }
 
     /**
@@ -117,7 +117,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testRead()
         $this->markTestIncomplete("read test not implemented");
 
-        $this->oLEDocument->read(1);
+        $this->oleDocument->read(1);
     }
 
     /**
@@ -128,7 +128,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testGetData()
         $this->markTestIncomplete("getData test not implemented");
 
-        $this->oLEDocument->getData(1);
+        $this->oleDocument->getData(1);
     }
 
     /**
@@ -139,7 +139,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testGetDocumentStream()
         $this->markTestIncomplete("getDocumentStream test not implemented");
 
-        $this->oLEDocument->getDocumentStream();
+        $this->oleDocument->getDocumentStream();
     }
 
     /**
@@ -150,7 +150,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testGetStream()
         $this->markTestIncomplete("getStream test not implemented");
 
-        $this->oLEDocument->getStream(1);
+        $this->oleDocument->getStream(1);
     }
 
     /**
@@ -161,7 +161,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testFindStreamByName()
         $this->markTestIncomplete("findStreamByName test not implemented");
 
-        $this->oLEDocument->findStreamByName('DocumentProperties');
+        $this->oleDocument->findStreamByName('DocumentProperties');
     }
 
     /**
@@ -172,7 +172,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testCreateFromStream()
         $this->markTestIncomplete("CreateFromStream test not implemented");
 
-        $this->oLEDocument->CreateFromStream(/* parameters */);
+        $this->oleDocument->CreateFromStream(/* parameters */);
     }
 
     /**
@@ -183,7 +183,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testCreateFromFile()
         $this->markTestIncomplete("CreateFromFile test not implemented");
 
-        $this->oLEDocument->CreateFromFile(/* parameters */);
+        $this->oleDocument->CreateFromFile(/* parameters */);
     }
 
     /**
@@ -194,7 +194,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testCreateFromString()
         $this->markTestIncomplete("CreateFromString test not implemented");
 
-        $this->oLEDocument->CreateFromString(/* parameters */);
+        $this->oleDocument->CreateFromString(/* parameters */);
     }
 
     /**
@@ -205,7 +205,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testGetIterator()
         $this->markTestIncomplete("getIterator test not implemented");
 
-        $this->oLEDocument->getIterator(/* parameters */);
+        $this->oleDocument->getIterator(/* parameters */);
     }
 
     /**
@@ -216,7 +216,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testCount()
         $this->markTestIncomplete("count test not implemented");
 
-        $this->oLEDocument->count(/* parameters */);
+        $this->oleDocument->count(/* parameters */);
     }
 
     /**
@@ -227,7 +227,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testOffsetGet()
         $this->markTestIncomplete("offsetGet test not implemented");
 
-        $this->oLEDocument->offsetGet(/* parameters */);
+        $this->oleDocument->offsetGet(/* parameters */);
     }
 
     /**
@@ -238,7 +238,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testOffsetExists()
         $this->markTestIncomplete("offsetExists test not implemented");
 
-        $this->oLEDocument->offsetExists(/* parameters */);
+        $this->oleDocument->offsetExists(/* parameters */);
     }
 
     /**
@@ -249,7 +249,7 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testOffsetUnset()
         $this->markTestIncomplete("offsetUnset test not implemented");
 
-        $this->oLEDocument->offsetUnset(/* parameters */);
+        $this->oleDocument->offsetUnset(/* parameters */);
     }
 
     /**
@@ -260,6 +260,6 @@ class OleDocumentTest extends TestCase
         // TODO Auto-generated OleDocumentTest->testOffsetSet()
         $this->markTestIncomplete("offsetSet test not implemented");
 
-        $this->oLEDocument->offsetSet(/* parameters */);
+        $this->oleDocument->offsetSet(/* parameters */);
     }
 }

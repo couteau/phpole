@@ -8,8 +8,7 @@
 	],
 	"autoload": {
 		"files": [
-			"src/OleUtil.php",
-			"src/OleConst.php"
+			"src/OleUtil.php"
 		],
 		"psr-4": {
 			"Cryptodira\\PhpOle\\": "src/",

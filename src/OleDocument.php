@@ -445,7 +445,7 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
      * @param int $streamid
      * @return string
      */
-    public function getData($streamid)
+    public function getStreamData($streamid)
     {
         if ($this->fileSpecs[$streamid]['ObjectType'] != 2)
             return null; // should this throw an error?
@@ -491,43 +491,44 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
         return false;
     }
 
-    public function getStream($stream)
+    public function getEntry($entry)
     {
-        if (is_null($stream)) {
-            $stream = $this->getDocumentStream();
-            $filespec = $this->fileSpecs[$stream];
-        } elseif (is_string($stream)) {
-            if (!$stream = $this->FindStreamByName($stream)) {
-                throw new \Exception("Stream {$stream} not found");
+        if (is_null($entry)) {
+            $entry = $this->getDocumentStream();
+            $filespec = $this->fileSpecs[$entry];
+        } elseif (is_string($entry)) {
+            if (!$entry = $this->findEntryByName($entry)) {
+                throw new \Exception("Stream {$entry} not found");
             }
-            $filespec = $this->fileSpecs[$stream];
-        } elseif (is_int($stream)) {
-            $filespec = $this->fileSpecs[$stream];
-        } elseif (is_array($stream)) {
-            $filespec = $stream;
+            $filespec = $this->fileSpecs[$entry];
+        } elseif (is_int($entry)) {
+            $filespec = $this->fileSpecs[$entry];
+        } elseif (is_array($entry)) {
+            $filespec = $entry;
+            $entry = array_search($filespec, $this->fileSpecs);
         } else {
-            throw new \Exception("Invalid stream {$stream}");
+            throw new \Exception("Invalid stream {$entry}");
         }
 
         if ($filespec['ObjectType'] === self::RootStorageObject) {
             return $this->rootStorage;
         } else {
             $class = self::TYPE_MAP[$filespec['ObjectType']];
-            return new $class($this, $stream);
+            return new $class($this, $entry);
         }
     }
 
     /**
      * Return the streamid for the stream with the passed stream name
      *
-     * @param string $streamName
+     * @param string $entryName
      * @return number|boolean
      */
-    public function findStreamByName($streamName)
+    public function findEntryByName($entryName)
     {
-        // could use the red/black tree to do this more quickly
-        foreach ($this->fileSpecs as $id => $stream) {
-            if ($stream['EntryName'] == $streamName) {
+        // could use the separate name-indexed array to do this more quickly
+        foreach ($this->fileSpecs as $id => $entry) {
+            if ($entry['EntryName'] == $entryName) {
                 return $id;
             }
         }

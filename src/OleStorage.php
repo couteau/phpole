@@ -3,7 +3,7 @@ namespace Cryptodira\PhpOle;
 
 /**
  *
- * @author stuart
+ * @author Stuart C. Naifeh <stuart@cryptodira.org>
  *
  */
 class OleStorage extends OleEntry implements \IteratorAggregate, \Countable, \ArrayAccess
@@ -62,20 +62,25 @@ class OleStorage extends OleEntry implements \IteratorAggregate, \Countable, \Ar
      * @param string $streamName
      * @return number|boolean
      */
-    public function findStreamByName($streamName)
+    public function findEntryByName($entryName)
     {
-        return $this->nameMap[$streamName] ?? false;
+        return $this->nameMap[$entryName] ?? false;
     }
 
-    public function getStreamById($streamId)
+    public function getEntryById($entryId)
     {
-        return $this->entries[$streamId] ?? false;
+        return $this->entries[$entryId] ?? false;
     }
 
-    public function getData($streamId)
+    public function getEntry($entry)
+    {
+        return $this->root->getEntry($entry);
+    }
+
+    public function getStreamData($streamId)
     {
         if (array_key_exists($streamId, $this->entries)) {
-            return $this->root->getData($streamId);
+            return $this->root->getStreamData($streamId);
         } else {
             return null;
         }

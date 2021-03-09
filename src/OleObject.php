@@ -6,21 +6,21 @@ namespace Cryptodira\PhpOle;
  * @author stuart
  *
  */
-class OleEntry
+class OleObject
 {
 
     protected $root;
 
     protected $entry;
 
-    public function __construct(OleDocument $root, $stream)
+    public function __construct(OleDocument $root, $stream = null)
     {
         $this->root = $root;
         if (is_null($stream)) {
             $stream = $root->getDocumentStream();
             $filespec = $root[$stream];
         } elseif (is_string($stream)) {
-            if (!$stream = $root->FindStreamByName($stream)) {
+            if (!$stream = $root->findEntryByName($stream)) {
                 throw new \Exception("Stream {$stream} not found");
             }
             $filespec = $root[$stream];

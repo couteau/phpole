@@ -6,7 +6,7 @@ namespace Cryptodira\PhpOle;
  * @author Stuart C. Naifeh <stuart@cryptodira.org>
  *
  */
-class OleStorage extends OleEntry implements \IteratorAggregate, \Countable, \ArrayAccess
+class OleStorage extends OleObject implements \IteratorAggregate, \Countable, \ArrayAccess
 {
 
     /**
@@ -67,14 +67,14 @@ class OleStorage extends OleEntry implements \IteratorAggregate, \Countable, \Ar
         return $this->nameMap[$entryName] ?? false;
     }
 
-    public function getEntryById($entryId)
+    public function getDirectoryEntryById($entryId)
     {
         return $this->entries[$entryId] ?? false;
     }
 
-    public function getEntry($entry)
+    public function getObject($entry)
     {
-        return $this->root->getEntry($entry);
+        return $this->root->getObject($entry);
     }
 
     public function getStreamData($streamId)

@@ -7,18 +7,18 @@ namespace Cryptodira\PhpOle;
  * @author Stuart C. Naifeh <stuart@cryptodira.org>
  *
  */
-class OleStream extends OleEntry
+class OleStream extends OleObject
 {
 
     private $fat;
 
-    private $blocksize;
+    private $sectorsize;
 
     private $readsector;
 
     private $fatpointer;
 
-    private $firstblock;
+    private $firstsector;
 
     private $buffer;
 
@@ -37,32 +37,32 @@ class OleStream extends OleEntry
     {
         parent::__construct($root, $stream);
 
-        $this->firstblock = $this->entry['StartingBlock'];
+        $this->firstsector = $this->entry['StartingSector'];
         $this->size = $this->entry['StreamSize'];
 
         // Use a closure/binding to access the internals of the Ole document -- simulating a C++ friend relationship
-        $initialize = function (OleDocument $root, $size, &$readsector, &$fat, &$blocksize) {
+        $initialize = function (OleDocument $root, $size, &$readsector, &$fat, &$sectorsize) {
             if ($size >= $root->header['MiniStreamCutoff']) {
                 $readsector = \Closure::fromCallable([
                     $root,
-                    'getBlockData'
+                    'getSectorData'
                 ]);
                 $fat = $root->FAT;
-                $blocksize = $root->blocksize;
+                $sectorsize = $root->sectorsize;
             } else {
                 $readsector = \Closure::fromCallable([
                     $root,
-                    'getMiniBlockData'
+                    'getMiniSectorData'
                 ]);
                 $fat = $root->MiniFAT;
-                $blocksize = 64;
+                $sectorsize = 64;
             }
         };
 
         $initialize = $initialize->bindTo($this, $root);
-        $initialize($root, $this->size, $this->readsector, $this->fat, $this->blocksize);
+        $initialize($root, $this->size, $this->readsector, $this->fat, $this->sectorsize);
 
-        $this->fatpointer = $this->firstblock;
+        $this->fatpointer = $this->firstsector;
         $this->pos = 0;
         $this->buffer = null;
     }
@@ -74,11 +74,11 @@ class OleStream extends OleEntry
      */
     private function doSeek($pos)
     {
-        $oldsector = intdiv($this->pos, $this->blocksize);
-        $newsector = intdiv($pos, $this->blocksize);
+        $oldsector = intdiv($this->pos, $this->sectorsize);
+        $newsector = intdiv($pos, $this->sectorsize);
 
         if ($newsector != $oldsector) {
-            $this->fatpointer = $this->firstblock;
+            $this->fatpointer = $this->firstsector;
             for ($i = 0; $i < $newsector && $this->fatpointer != OleDocument::ENDOFCHAIN; $i++)
                 $this->fatpointer = $this->fat[$this->fatpointer];
 
@@ -104,7 +104,7 @@ class OleStream extends OleEntry
     public function rewind()
     {
         $this->buffer = null;
-        $this->fatpointer = $this->firstblock;
+        $this->fatpointer = $this->firstsector;
         $this->pos = 0;
     }
 
@@ -170,28 +170,28 @@ class OleStream extends OleEntry
             $this->buffer = ($this->readsector)($this->fatpointer);
         }
 
-        $sector_offset = $this->pos % $this->blocksize;
-        if ($bytes <= $this->blocksize - $sector_offset) {
+        $sector_offset = $this->pos % $this->sectorsize;
+        if ($bytes <= $this->sectorsize - $sector_offset) {
             $data = substr($this->buffer, $sector_offset, $bytes);
             $this->pos += $bytes;
-            if ($sector_offset + $bytes == $this->blocksize) {
+            if ($sector_offset + $bytes == $this->sectorsize) {
                 $this->fatpointer = $this->fat[$this->fatpointer];
                 $this->buffer = null;
             }
         } else {
             $data = substr($this->buffer, $sector_offset);
             $this->buffer = null;
-            $bytesread = $this->blocksize - $sector_offset;
+            $bytesread = $this->sectorsize - $sector_offset;
             $this->fatpointer = $this->fat[$this->fatpointer];
             while ($this->fatpointer != OleDocument::ENDOFCHAIN && $bytesread < $bytes) {
-                if (($bytes - $bytesread) < $this->blocksize) {
+                if (($bytes - $bytesread) < $this->sectorsize) {
                     $this->buffer = ($this->readsector)($this->fatpointer);
                     $data .= substr($this->buffer, 0, $bytes - $bytesread);
                     $bytesread = $bytes;
                     break;
                 } else {
                     $data .= ($this->readsector)($this->fatpointer);
-                    $bytesread += $this->blocksize;
+                    $bytesread += $this->sectorsize;
                 }
 
                 $this->fatpointer = $this->fat[$this->fatpointer];

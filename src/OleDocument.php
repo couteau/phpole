@@ -15,6 +15,13 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
 {
 
     /**
+     * Directory and file name containing the data store
+     *
+     * @var string
+     */
+    private $filepath;
+
+    /**
      * File descriptor for underlying data store
      *
      * @var resource
@@ -30,27 +37,49 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
     private $header;
 
     /**
-     * Block size for this file: 512 for version <= 3, 4096 for version 4
+     * Whether the header fields have been modified and need to be written to the file
+     *
+     * @var bool
+     */
+    private $headerDirty;
+
+    /**
+     * Sector size for this file: 512 for version <= 3, 4096 for version 4
+     * calculated as 1 << SectorShift
      *
      * @var int
      */
-    private $blocksize;
+    private $sectorsize;
 
     /**
-     * Format string of regular blocks for unpack()
-     * Either OleV3FATBlockFormat or OleV4FATBlockFormat
+     * Sector size for the mini stream
+     *
+     * @var int
+     */
+    private $minisectorsize;
+
+    /**
+     * Format string of regular FAT sectors for unpack()
+     * Either OleV3FATSectorFormat or OleV4FATSectorFormat
      *
      * @var string
      */
-    private $FAT_blockformat;
+    private $FAT_sectorformat;
 
     /**
-     * Format string of directory information blocks for unpack()
-     * Either OleV3DIFATBlockFormat or OleV4DIFATBlockFormat
+     * Format string of double indirect FAT sectors for unpack()
+     * Either OleV3DIFATSectorFormat or OleV4DIFATSectorFormat
      *
      * @var string
      */
-    private $DIFAT_blockformat;
+    private $DIFAT_sectorformat;
+
+    /**
+     * Ole double indirect file allocation table for the file
+     *
+     * @var array
+     */
+    private $DIFAT;
 
     /**
      * Ole file allocation table for the file
@@ -64,7 +93,7 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
      *
      * @var array
      */
-    private $MiniFAT;
+    private $miniFAT;
 
     /**
      * All directory entries in the Ole container, not in a directory structure
@@ -120,23 +149,23 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
     // Magic number identifying file as an Ole compound file
     const OleSignature = 'd0cf11e0a1b11ae1';
 
-    // Unpack() format string for a 512 byte FAT block
-    // Each FAT block contains 128 FAT entries
-    const OleV3FATBlockFormat = 'V128';
+    // Unpack() format string for a 512 byte FAT sector
+    // Each FAT sector contains 128 FAT entries
+    const OleV3FATSectorFormat = 'V128';
 
-    // Unpack() format string for a 512 byte directory information FAT block
-    // Each block contains 127 FAT entries for blocks containing directory information and
-    // one entry pointing to the next directory information FAT block
-    const OleV3DIFATBlockFormat = 'V127FATBlocks/V1NextDIFATBlock';
+    // Unpack() format string for a 512 byte directory information FAT sector
+    // Each sector contains 127 FAT entries for sectors containing directory information and
+    // one entry pointing to the next directory information FAT sector
+    const OleV3DIFATSectorFormat = 'V127FATSectors/V1NextDIFATSector';
 
-    // Unpack() format string for a 4096 byte FAT block
-    // Each FAT block contains 1024 FAT entries
-    const OleV4FATBlockFormat = 'V1024';
+    // Unpack() format string for a 4096 byte FAT sector
+    // Each FAT sector contains 1024 FAT entries
+    const OleV4FATSectorFormat = 'V1024';
 
-    // Unpack() format string for a 4096 byte directory information FAT block
-    // Each block contains 1023 FAT entries for blocks containing directory information and
-    // one entry pointing to the next directory information FAT block
-    const OleV4DIFATBlockFormat = 'V1023FATBlocks/V1NextDIFATBlock';
+    // Unpack() format string for a 4096 byte directory information FAT sector
+    // Each sector contains 1023 FAT entries for sectors containing directory information and
+    // one entry pointing to the next directory information FAT sector
+    const OleV4DIFATSectorFormat = 'V1023FATSectors/V1NextDIFATSector';
 
     // @formatter:off
     // Unpack() format string for the Ole Header
@@ -146,18 +175,18 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
             'v1MinorVersion/' .         # 18 2 bytes
             'v1MajorVersion/' .         # 1A 2 bytes
             'v1ByteOrder/' .            # 1C 2 bytes
-            'v1BlockShift/' .           # 1E 2 bytes
-            'v1MiniBlockShift/' .       # 20 2 bytes
+            'v1SectorShift/' .           # 1E 2 bytes
+            'v1MiniSectorShift/' .       # 20 2 bytes
             'Z6Reserved1/' .            # 22 6 bytes
-            'V1DirectoryBlocks/' .      # 28 4 bytes
-            'V1FATBlocks/' .            # 2C 4 bytes
-            'V1FirstDirectoryBlock/' .  # 30 4 bytes
+            'V1DirectorySectors/' .      # 28 4 bytes
+            'V1FATSectors/' .            # 2C 4 bytes
+            'V1FirstDirectorySector/' .  # 30 4 bytes
             'V1TransactionSignature/' . # 34 4 bytes
             'V1MiniStreamCutoff/' .     # 38 4 bytes
-            'V1FirstMiniFATBlock/' .    # 3C 4 bytes
-            'V1MiniFATBlockCount/' .    # 40 4 bytes
-            'V1FirstDIFATBlock/' .      # 44 4 bytes
-            'V1DIFATBlockCount/' .      # 48 4 bytes
+            'V1FirstMiniFATSector/' .    # 3C 4 bytes
+            'V1MiniFATSectorCount/' .    # 40 4 bytes
+            'V1FirstDIFATSector/' .      # 44 4 bytes
+            'V1DIFATSectorCount/' .      # 48 4 bytes
             'V109DIFAT';                # 4C 436 bytes
 
     // Unpack() format string for a single directory entry (128 bytes)
@@ -173,7 +202,7 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
             'V1StateBits/' .        # 60 4 bytes
             'P1CreationTime/' .     # 64 8 bytes
             'P1ModifiedTime/' .     # 6C 8 bytes
-            'V1StartingBlock/' .    # 74 4 bytes
+            'V1StartingSector/' .    # 74 4 bytes
             'P1StreamSize/';        # 78 8 bytes
     // @formatter:on
 
@@ -193,7 +222,16 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
      */
     public function __destruct()
     {
-        $this->Close();
+        $this->close();
+    }
+
+    public function new($filepath, $format = true)
+    {
+        $this->filepath = $filepath;
+        if ($format) {
+            $this->format();
+        }
+        return $this;
     }
 
     public function open($source)
@@ -212,7 +250,97 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
         } else {
             throw new \InvalidArgumentException('Passed source could not be interpreted as an Ole file');
         }
+        return $this;
+    }
 
+    private function writeHeader($version = null)
+    {
+        if ($version === null && $this->header) {
+            $version = $this->header['MajorVersion'];
+        }
+
+        if ($version != 0x0003 && $version != 0x0004) {
+            throw new \InvalidArgumentException('Invalid OLE file version: ' . $version);
+        }
+
+        if (!$this->header) {
+            $$this->header = $this->initializeHeader($version);
+        }
+        $headerValues = array_merge(array_values($this->header), array_slice($this->DIFAT, 0, 109));
+
+        $fmt = preg_replace('/([A-Za-z][0-9]+)[A-Z]\w+(\/|$)/', '$1', self::OleHeaderFormat);
+        $header = pack($fmt, ...$headerValues);
+
+        if (!$this->stream) {
+            $this->stream = fopen($this->filepath, 'r+');
+        } else {
+            rewind($this->stream);
+        }
+
+        fwrite($this->stream, $header);
+        if ($version === 0x0004) {
+            fwrite($this->stream, str_repeat(chr(0), 0x800)); // pad header to a full sector
+        }
+    }
+
+    private function writeFAT()
+    {
+        for ($fat = $this->FAT, $i = 0; $fatdata = array_splice($fat, 0, $this->sectorsize / 4); $i++) {
+            $fatstring = pack($this->FAT_sectorformat, ...$fatdata);
+            if ($this->DIFAT[$i] >= self::MAXREGSECT) {
+                throw new \BadMethodCallException('Number of FAT entries does not correspond to number of FAT sectors in DIFAT');
+            }
+            $this->writeSectorData($this->DIFAT[$i], $fatstring);
+        }
+    }
+
+    private function writeDirectorySectors()
+    {
+        $fmt = preg_replace('/([A-Za-z][0-9]+)[A-Z]\w+(\/|$)/', '$1', self::OleDirectoryEntryFormat);
+
+        $s = $this->header['FirstDirectorySector'];
+        if ($s === self::ENDOFCHAIN) {
+            return;
+        }
+
+        $data = '';
+        foreach ($this->fileSpecs as $index => $fileSpec) {
+            $fileSpec['EntryName'] = mb_convert_encoding($fileSpec['EntryName'], "UTF-16LE", "UTF-8");
+            $newentry = pack($fmt, ...array_values($fileSpec));
+            $data .= $newentry;
+            if (strlen($data) === $this->sectorsize) {
+                $this->writeSectorData($s, $data);
+                $s = $this->FAT[$s];
+                if ($s === self::ENDOFCHAIN && $index < count($this->fileSpecs) - 1) {
+                    throw new \BadMethodCallException('Insufficient directory sectors allocated to hold all directory entries');
+                }
+                $data = '';
+            }
+        }
+
+        if (strlen($data) < $this->sectorsize) {
+            $this->writeSectorData($s, $data);
+        }
+    }
+
+    public function writeMiniStream()
+    {
+        // write the miniFAT data. Don't need to write the stream for now, because it's unbuffered and will be written on modification
+        for ($i = 0, $s = $this->header['FirstMiniFATSector'], $fat = $this->miniFAT; $fatdata = array_splice($fat, 0, $this->sectorsize / 4); $i++, $s = $this->FAT[$s]) {
+            $fatstring = pack($this->FAT_sectorformat, ...$fatdata);
+            if ($s >= self::MAXREGSECT) {
+                throw new \BadMethodCallException('Number of miniFAT entries does not correspond to number of miniFAT sectors in the FAT');
+            }
+            $this->writeSectorData($s, $fatstring);
+        }
+    }
+
+    public function save()
+    {
+        $this->writeHeader();
+        $this->writeFAT();
+        $this->writeMiniStream();
+        $this->writeDirectorySectors();
     }
 
     /**
@@ -223,61 +351,234 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
         if ($this->stream)
             fclose($this->stream);
         $this->stream = null;
+        $this->header = null;
         $this->FAT = null;
-        $this->MiniFAT = null;
+        $this->miniFAT = null;
         $this->rootStorage = null;
         $this->fileSpecs = null;
+        return $this;
     }
 
-    /**
-     * Get the size of big blocks in this Ole file (512 or 4096)
-     */
-    public function getBlocksize()
+    private function initializeHeader($version)
     {
-        return $this->blocksize;
+        $header = array_merge([
+            self::OleSignature,	                    // Signature
+            str_repeat('0', 32),	                // CLSID
+            0x003E,	                                // MinorVersion
+            $version,	                            // MajorVersion
+            0xFFFE,	                                // ByteOrder
+            $version === 0x0003 ? 0x0009 : 0x000C,	// SectorShift
+            0x0006,	                                // MiniSectorShift
+            str_repeat(chr(0), 6),	                // Reserved1
+            0,	                                    // DirectorySectors
+            0,	                                    // FATSectors
+            self::ENDOFCHAIN,	                    // FirstDirectorySector
+            0,	                                    // TransactionSignature
+            0x00001000,	                            // MiniStreamCutoff
+            self::ENDOFCHAIN,	                    // FirstMiniFATSector
+            0,	                                    // MiniFATSectorCount
+            self::ENDOFCHAIN,	                    // FirstDIFATSector
+            0,	                                    // DIFATSectorCount
+        ], array_fill(0, 109, self::FREESECT));     // DIFAT
+        
+        $fmt = preg_replace('/([A-Za-z][0-9]+)[A-Z]\w+(\/|$)/', '$1', self::OleHeaderFormat);
+        $data = pack($fmt, ...$header);
+        $this->readHeader($data);
+        $this->headerDirty = true;
     }
 
-    /**
-     * Get the the block number of the next block in the chain
-     *
-     * @param int $block
-     */
-    public function getNextBlock($block)
+    private function intitializeFAT()
     {
-        if (($block & 0xFFFFFFF8) !== 0xFFFFFFF8) {
-            return $this->FAT[$block];
+        // create one sector worth of fat entries, and reserve sector 0 for the new FAT sector
+        $this->FAT = array_fill(0, $this->sectorsize / 4, self::FREESECT);
+        $this->FAT[0] = self::FATSECT;
+        $this->header['FATSectors'] = 1;
+        $this->DIFAT[0] = 0;
+        $this->headerDirty = true;
+    }
+
+    public function initializeRootStorage()
+    {
+        $this->header['FirstDirectorySector'] = $this->allocateSector();
+        if ($this->header['MajorVersion'] === 0x0004) {
+            $this->header['DirectorySectors'] = 1;
+        }
+        $this->fileSpecs = array([
+            'EntryName' => 'RootEntry',
+            'EntryNameLength' => 9,
+            'ObjectType' => self::RootStorageObject,
+            'ColorFlag' => 0,
+            'LeftSiblingID' => self::NOSTREAM,
+            'RightSiblingID' => self::NOSTREAM,
+            'ChildID' => self::NOSTREAM,
+            'CLSID' => str_repeat('0', 32),
+            'StateBits' => 0,
+            'CreationTime' => 0,
+            'ModifiedTime' => 0,
+            'StartingSector' => self::ENDOFCHAIN,
+            'StreamSize' => 0,
+        ]);
+        $this->rootStorage = new OleStorage($this);
+        $this->headerDirty = true;
+    }
+
+    public function initializeMiniStream()
+    {
+        // TODO: make sure the ministream isn't already initialized
+        $this->header['FirstMiniFATSector'] = $this->allocateSector();
+        $this->header['MiniFATSectorCount'] = 1;
+        $this->miniFAT = array_fill(0, $this->sectorsize / 4, self::FREESECT);
+        $this->fileSpecs[0]['StartingSector'] = $this->allocateSector(true);
+        $this->headerDirty = true;
+    }
+
+    public function format($version = 0x0003)
+    {
+        $this->header = null;
+        $this->FAT = null;
+        $this->miniFAT = null;
+        $this->rootStorage = null;
+        $this->fileSpecs = null;
+        if ($this->stream) {
+            ftruncate($$this->stream, 0);
         } else {
-            return $block;
+            $this->stream = fopen($this->filepath, 'w+');
+        }
+        $this->initializeHeader($version);
+        $this->intitializeFAT();
+        $this->initializeRootStorage();
+        $this->save();
+    }
+
+    private function allocateSector($initialize = false, $code = self::ENDOFCHAIN, $prevSector = null)
+    {
+        for ($i = 0; $i < count($this->FAT) && $this->FAT[$i] !== self::FREESECT; $i++);
+        if ($i ===  count($this->FAT)) {
+            // Allocate a new FAT sector
+        }
+        $this->FAT[$i] = $code;
+        if ($prevSector) {
+            $this->FAT[$prevSector] = $i;
+        }
+        if ($initialize) {
+            $this->writeSectorData($i, '');
+        }
+        return $i;
+    }
+
+    /**
+     * Get the size of big sectors in this Ole file (512 or 4096)
+     */
+    public function getSectorSize()
+    {
+        return $this->sectorsize;
+    }
+
+    /**
+     * Get the the sector number of the next sector in the chain
+     *
+     * @param int $sector
+     */
+    public function getNextSector($sector)
+    {
+        if ($sector <= self::MAXREGSECT) {
+            return $this->FAT[$sector];
+        } else {
+            return $sector;
         }
     }
 
     /**
-     * Read a single block from the underlying file descriptor
+     * Read a single sector from the underlying file descriptor
      *
-     * @param int $block
+     * @param int $sector
      * @throws \Exception
      * @return string
      */
-    public function getBlockData($block)
+    public function getSectorData($sector)
     {
-        fseek($this->stream, ($block + 1) * $this->blocksize);
-        $data = fread($this->stream, $this->blocksize);
+        fseek($this->stream, ($sector + 1) * $this->sectorsize);
+        $data = fread($this->stream, $this->sectorsize);
 
         if (!$data)
-            throw new \Exception("Could not read block {$block}");
+            throw new \Exception("Could not read sector {$sector}");
 
         return $data;
     }
 
+    private function writeSectorData($sector, $data)
+    {
+        if (strlen($data) > $this->sectorsize) {
+            throw new \BadMethodCallException('attempt to write more than ' . $this->sectorsize . ' bytes to a single sector');
+        }
+        
+        if (strlen($data) < $this->sectorsize) {
+            $data = str_pad($data, $this->sectorsize, chr(0));
+        }
+        fseek($this->stream, (1 + $sector) * $this->sectorsize);
+        fwrite($this->stream, $data);
+    }
+
     /**
-     * Read a seingle block from the mini stream
+     * Read a seingle sector from the mini stream
      *
-     * @param int $block
+     * @param int $sector
      * @return string
      */
-    public function getMiniBlockData($block)
+    public function getMiniSectorData($sector)
     {
-        return $this->read(0, 64, $block * 64);
+        return $this->read(0, 64, $sector * 64);
+    }
+
+    /**
+     * Read the header record and initialize internal data structures/values
+     */
+    private function readHeader($data = null)
+    {
+        if (!$data) {
+            $data = (string) fread($this->stream, self::OleHeaderSize);
+        }
+
+        if (!$data) {
+            throw new \Exception("Could not read header sector");
+        }
+
+        $this->header = unpack($this::OleHeaderFormat, $data);
+        if ($this->header['Signature'] != self::OleSignature) {
+            throw new \Exception("Stream is not an Ole file");
+        }
+
+        $this->DIFAT = array_values(array_splice($this->header, -109, 109));
+        $this->sectorsize = 1 << $this->header['SectorShift'];
+        $this->minisectorsize = 1 << $this->header['MiniSectorShift'];
+        switch ($this->header['MajorVersion']) {
+            case 0x03:
+                $this->FAT_sectorformat = self::OleV3FATSectorFormat;
+                $this->DIFAT_sectorformat = self::OleV3DIFATSectorFormat;
+                break;
+            case 0x04:
+                $this->FAT_sectorformat = self::OleV4FATSectorFormat;
+                $this->DIFAT_sectorformat = self::OleV4DIFATSectorFormat;
+                fseek($this->stream, $this->sectorsize, SEEK_SET); // move to start of first sector after header
+                break;
+            default:
+                throw new \Exception("Invalid SectorShift");
+        }
+    }
+
+    /** 
+     * Load the DIFAT sectors beyond the DIFAT entries stored in the header
+     * and add them to the DIFAT array
+     */
+    private function readDIFAT()
+    {
+        $s = $this->header['FirstDIFATSector'];
+        while ($s != self::ENDOFCHAIN) {
+            $data = $this->getSectorData($s);
+            $difat = unpack($this->DIFAT_sectorformat, $data);
+            $this->DIFAT = array_merge($this->DIFAT, array_values(array_slice($difat, 0, sizeof($difat) - 1)));
+            $s = $difat['NextDIFATSector'];
+        }
     }
 
     /**
@@ -286,62 +587,46 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
     private function readFAT()
     {
         $this->FAT = array();
-        for ($i = 0; $i < 109; $i++) {
-            if ($this->header['DIFAT'][$i] >= self::ENDOFCHAIN)
-                return;
-            $data = $this->getBlockData($this->header['DIFAT'][$i]);
-            $entries = unpack($this->FAT_blockformat, $data);
+        for ($i = 0; $i < count($this->DIFAT) && $this->DIFAT[$i] !== self::FREESECT; $i++) {
+            $data = $this->getSectorData($this->DIFAT[$i]);
+            $entries = unpack($this->FAT_sectorformat, $data);
             $this->FAT = array_merge($this->FAT, $entries);
-        }
-
-        $s = $this->header['FirstDIFATBlock'];
-        while ($s != self::ENDOFCHAIN) {
-            $data = $this->getBlockData($s);
-            $difat = unpack($this->DIFAT_blockformat, $data);
-            $difat['FATBlocks'] = array_values(array_splice($difat, 0, sizeof($difat) - 1));
-
-            for ($i = 0; $i < $this->blocksize / 4 - 1; $i++) {
-                if ($difat['FATBlocks'][$i] == self::ENDOFCHAIN)
-                    return;
-                $data = $this->getBlockData($this->header['DIFAT'][$i]);
-                $entries = unpack($this->FAT_blockformat, $data);
-                $this->FAT = array_merge($this->FAT, $entries);
-            }
-
-            $s = $difat['NextDIFATBlock'];
         }
     }
 
     /**
-     * Load the entire MiniFAT into $this->MiniFAT
+     * Load the entire miniFAT into $this->miniFAT
      */
     private function readMiniFAT()
     {
-        $this->MiniFAT = array();
-        $s = $this->header['FirstMiniFATBlock'];
+        $this->miniFAT = array();
+        $s = $this->header['FirstMiniFATSector'];
         while ($s != self::ENDOFCHAIN) {
-            $data = $this->getBlockData($s);
-            $entries = unpack($this->FAT_blockformat, $data);
-            $this->MiniFAT = array_merge($this->MiniFAT, $entries);
+            $data = $this->getSectorData($s);
+            $entries = unpack($this->FAT_sectorformat, $data);
+            $this->miniFAT = array_merge($this->miniFAT, $entries);
             $s = $this->FAT[$s];
         }
     }
 
     /**
-     * Read directory entries from a directory information block and add them to an existing
+     * Read directory entries from a directory information sector and add them to an existing
      * array, if passed.
      * Return an array containing the directory entries.
      *
-     * @param int $block
+     * @param int $sector
      * @param array $entries
      * @return string|string[]
      */
-    private function readDirectoryBlock($block)
+    private function readDirectorySector($sector)
     {
-        $data = $this->getBlockData($block);
-        for ($i = 0; $i < $this->blocksize / 128; $i++) {
+        $data = $this->getSectorData($sector);
+        for ($i = 0; $i < $this->sectorsize / self::OleDirectoryEntrySize; $i++) {
             $newentry = unpack(OleDocument::OleDirectoryEntryFormat, $data, $i * OleDocument::OleDirectoryEntrySize);
-            // unpack cuts off the final byte of the final UTF-16LE character if it is null, so we have to add it back on
+            if ($newentry['ObjectType'] === 0) {
+                break;
+            }
+            // unpack cuts off the final byte of the final UTF-16LE character if it is null, so we have to add it back on before converting
             if (strlen($newentry['EntryName']) % 2 != 0)
                 $newentry['EntryName'] .= chr(0);
             $newentry['EntryName'] = mb_convert_encoding($newentry['EntryName'], "UTF-8", "UTF-16LE");
@@ -355,9 +640,9 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
     private function readFileSpecs()
     {
         $this->fileSpecs = [];
-        $s = $this->header['FirstDirectoryBlock'];
+        $s = $this->header['FirstDirectorySector'];
         while ($s != OleDocument::ENDOFCHAIN) {
-            $this->readDirectoryBlock($s);
+            $this->readDirectorySector($s);
             $s = $this->FAT[$s];
         }
     }
@@ -395,23 +680,23 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
             $bytes = $this->fileSpecs[$streamid]['StreamSize'];
 
         if ($streamid == 0 || $this->fileSpecs[$streamid]['StreamSize'] >= $this->header['MiniStreamCutoff']) {
-            $readblock = array(
+            $readsector = array(
                 $this,
-                'getBlockData'
+                'getSectorData'
             );
             $fat = $this->FAT;
-            $bs = $this->blocksize;
+            $bs = $this->sectorsize;
         } else {
-            $readblock = array(
+            $readsector = array(
                 $this,
-                'getMiniBlockData'
+                'getMiniSectorData'
             );
-            $fat = $this->MiniFAT;
+            $fat = $this->miniFAT;
             $bs = 64;
         }
 
-        // first find the block containing the starting offset
-        $s = $this->fileSpecs[$streamid]['StartingBlock'];
+        // first find the sector containing the starting offset
+        $s = $this->fileSpecs[$streamid]['StartingSector'];
         $i = 0;
         while ($s != self::ENDOFCHAIN && $i < $offset) {
             if ($offset < $i + $bs)
@@ -420,19 +705,19 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
             $s = $fat[$s];
         }
 
-        // grab from the starting offset to the end of the starting block
-        $data = substr($readblock($s), $offset - $i, $bs - ($offset % $bs));
+        // grab from the starting offset to the end of the starting sector
+        $data = substr($readsector($s), $offset - $i, $bs - ($offset % $bs));
 
-        // keep adding blocks until we've got all the bytes requested
+        // keep adding sectors until we've got all the bytes requested
         if ($s != self::ENDOFCHAIN) {
             $s = $fat[$s];
             while (strlen($data) < $bytes && $s != self::ENDOFCHAIN) {
-                $data .= $readblock($s);
+                $data .= $readsector($s);
                 $s = $fat[$s];
             }
         }
 
-        // If the last block read added more bytes than requested, truncate the returned data
+        // If the last sector read added more bytes than requested, truncate the returned data
         if (strlen($data) > $bytes)
             return substr($data, 0, $bytes);
         else
@@ -451,25 +736,25 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
             return null; // should this throw an error?
 
         if ($streamid == 0 || $this->fileSpecs[$streamid]['StreamSize'] >= $this->header['MiniStreamCutoff']) {
-            $readblock = array(
+            $readsector = array(
                 $this,
-                'getBlockData'
+                'getSectorData'
             );
             $fat = $this->FAT;
-            // $bs = $this->blocksize;
+            // $bs = $this->sectorsize;
         } else {
-            $readblock = array(
+            $readsector = array(
                 $this,
-                'getMiniBlockData'
+                'getMiniSectorData'
             );
-            $fat = $this->MiniFAT;
+            $fat = $this->miniFAT;
             // $bs = 64;
         }
 
-        $s = $this->fileSpecs[$streamid]['StartingBlock'];
+        $s = $this->fileSpecs[$streamid]['StartingSector'];
         $data = '';
         while ($s != self::ENDOFCHAIN) {
-            $data .= $readblock($s);
+            $data .= $readsector($s);
             $s = $fat[$s];
         }
 
@@ -484,14 +769,14 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
     public function getDocumentStream()
     {
         foreach ($this->fileSpecs as $id => $stream) {
-            if ($stream['ObjectType'] == 2 && $stream['StartingBlock'] == 0)
+            if ($stream['ObjectType'] == 2 && $stream['StartingSector'] == 0)
                 return $id;
         }
 
         return false;
     }
 
-    public function getEntry($entry)
+    public function getObject($entry)
     {
         if (is_null($entry)) {
             $entry = $this->getDocumentStream();
@@ -572,33 +857,8 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
         $this->stream = $strm;
         rewind($this->stream);
 
-        $data = (string) fread($strm, self::OleHeaderSize);
-        if (!$data) {
-            throw new \Exception("Could not read header block");
-        }
-
-        $this->header = unpack($this::OleHeaderFormat, $data);
-        if ($this->header['Signature'] != self::OleSignature) {
-            throw new \Exception("Stream is not an Ole file");
-        }
-
-        $this->header['DIFAT'] = array_values(array_splice($this->header, -109, 109));
-        switch ($this->header['MajorVersion']) {
-            case 0x03:
-                $this->blocksize = 512;
-                $this->FAT_blockformat = self::OleV3FATBlockFormat;
-                $this->DIFAT_blockformat = self::OleV3DIFATBlockFormat;
-                break;
-            case 0x04:
-                $this->blocksize = 4096;
-                $this->FAT_blockformat = self::OleV4FATBlockFormat;
-                $this->DIFAT_blockformat = self::OleV4DIFATBlockFormat;
-                fseek($this->stream, 4096, SEEK_SET); // move to start of first block after header
-                break;
-            default:
-                throw new \Exception("Invalid BlockShift");
-        }
-
+        $this->readHeader();
+        $this->readDIFAT();
         $this->readFAT();
         $this->readMiniFAT();
         $this->readFileSpecs();
@@ -619,6 +879,7 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
             throw new \Exception("Could not open {$filepath} for reading");
         }
 
+        $this->filepath = $filepath;
         $strm = fopen($filepath, 'rb');
         return $this->CreateFromStream($strm);
     }

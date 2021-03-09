@@ -21,6 +21,7 @@ class Ole {
     const VT_ERROR = 0x000A;
     const VT_BOOL = 0x000B;
     const VT_VARIANT = 0x000C;
+    const VT_UNKNOWN = 0x000D;
     const VT_DECIMAL = 0x000E;
     const VT_I1 = 0x0010;
     const VT_UI1 = 0x0011;

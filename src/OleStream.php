@@ -27,7 +27,8 @@ class OleStream extends OleObject
     private $pos;
 
     /**
-     * Create a new Ole stream reader for a given stream within an Ole compound document
+     * Create a new Ole stream object for a given stream within an Ole compound document
+     * This class buffers reads by loading one full sector at a time to make small reads more efficient
      *
      * @param OleDocument $root
      * @param mixed $stream
@@ -37,8 +38,8 @@ class OleStream extends OleObject
     {
         parent::__construct($root, $stream);
 
-        $this->firstsector = $this->entry['StartingSector'];
-        $this->size = $this->entry['StreamSize'];
+        $this->firstsector = $this->entry->getStartingSector();
+        $this->size = $this->entry->getStreamSize();
 
         // Use a closure/binding to access the internals of the Ole document -- simulating a C++ friend relationship
         $initialize = function (OleDocument $root, $size, &$readsector, &$fat, &$sectorsize) {
@@ -200,6 +201,14 @@ class OleStream extends OleObject
         }
 
         return $data;
+    }
+
+    public function write($data)
+    {
+        // don't need to worry about buffering writes -- OleDocument already buffers all writes
+        $byteswritten = $this->root->write($this->entry->getId(), $data, $this->pos);
+        $this->doSeek($this->pos + $byteswritten);
+        return $byteswritten;
     }
 
     public function readUint1(): int

@@ -26,17 +26,22 @@ class OleObject
             $filespec = $root[$stream];
         } elseif (is_int($stream)) {
             $filespec = $root[$stream];
-        } elseif (is_array($stream)) {
+        } elseif ($stream instanceof OleDirectoryEntry) {
             $filespec = $stream;
         } else {
             throw new \Exception("Invalid stream {$stream}");
         }
 
-        if (static::class != OleDocument::TYPE_MAP[$filespec['ObjectType']]) {
-            throw new \Exception($filespec['EntryName'] . " is not the correct type for " . static::class);
+        if (static::class != OleDocument::TYPE_MAP[$filespec->getObjectType()]) {
+            throw new \Exception($filespec->getName() . " is not the correct type for " . static::class);
         }
 
         $this->entry = $filespec;
+    }
+
+    public function getEntry()
+    {
+        return $this->entry;
     }
 }
 

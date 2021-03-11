@@ -8,6 +8,12 @@ namespace Cryptodira\PhpOle;
  */
 class OleStorage extends OleObject implements \IteratorAggregate, \Countable, \ArrayAccess
 {
+    /**
+     * Root entry of red-black directory tree
+     *
+     * @var OleDirectoryEntry
+     */
+    private $rootEntry;
 
     /**
      * Array of directory entries in the directory structure
@@ -21,39 +27,41 @@ class OleStorage extends OleObject implements \IteratorAggregate, \Countable, \A
 
     /**
      */
-    public function __construct(OleDocument $root, $stream = null)
+    public function __construct(OleDocument $root, OleDirectoryEntry $object = null)
     {
-        parent::__construct($root, $stream);
-        $this->readStorageStream();
+        if ($object === null) {
+            $object = $root[0];
+        }
+        parent::__construct($root, $object);
+        $this->readStorage();
     }
 
-    private function visitNode($streamid, $callback)
+    private function visitNode($entry, $callback)
     {
-        $entry = $this->root[$streamid];
-
-        if ($entry['LeftSiblingID'] != OleDocument::FREESECT) {
-            $this->visitNode($entry['LeftSiblingID'], $callback);
+        if ($entry->leftChild()) {
+            $this->visitNode($entry->leftChild(), $callback);
         }
-        $callback($entry, $streamid);
-        if ($entry['RightSiblingID'] != OleDocument::FREESECT) {
-            $this->visitNode($entry['RightSiblingID'], $callback);
+        $callback($entry);
+        if ($entry->rightChild()) {
+            $this->visitNode($entry->rightChild(), $callback);
         }
     }
 
-    protected function readStorageStream()
+    protected function readStorage()
     {
-        if ($this->entry['ChildID'] != OleDocument::FREESECT) {
-            $this->visitNode($this->entry['ChildID'],
-                    function ($child, $streamid) {
-                        $this->entries[$streamid] = $child;
-                        $this->nameMap[$child['EntryName']] = $streamid;
+        $this->rootEntry = $this->entry->getRootEntry();
+        if ($this->rootEntry) {
+            $this->visitNode($this->rootEntry,
+                    function ($child) {
+                        $this->entries[$child->getId()] = $child;
+                        $this->nameMap[$child->getName()] = $child;
                     });
         }
     }
 
     public function foreach(\Closure $callback)
     {
-        $this->visitNode($this->entry['ChildID'], $callback);
+        $this->visitNode($this->rootEntry, $callback);
     }
 
     /**
@@ -85,6 +93,62 @@ class OleStorage extends OleObject implements \IteratorAggregate, \Countable, \A
             return null;
         }
     }
+    
+    /**
+     * Recursive search for the parent node at which to insert $entry
+     *
+     * @param OleDirectoryEntry $start - the position to search from 
+     * @param OleDirectoryEntry $entry - the entry to search for
+     * @return OleDirectoryEntry - the parent below which the entry should be inserted
+     * @throws \InvalidArgumentException
+     */
+    private function findInsertionPoint($start, $entry)
+    {
+        if ($start->isLeaf($start)) {
+            return $start;
+        }
+        $direction = $start->compareTo($entry);
+        if ($direction === 0 || !$start->hasChild($direction)) {
+            return $start;
+        }
+
+        return $this->findInsertionPoint($start->getChild($direction), $entry);
+    }
+
+    /**
+     * Insert a directory entry
+     *
+     * @param  OleDirectoryEntry $entry
+     * @return $this
+     */
+    public function insertEntry($entry)
+    {
+        // If root is null, set new entry as root
+        if ($this->rootEntry === null) {
+            $this->entry->setRootEntry($entry);
+        } else {
+            $insertNode = $this->findInsertionPoint($this->rootEntry, $entry);
+            $insertNode->setChild($insertNode, $insertNode->compareTo($entry), $entry);
+        }
+
+        // reload the entries and nameMap arrays
+        $this->readStorage();
+
+        return $this;
+    }
+
+    private function compareEntries($entry1, $entry2)
+    {
+        if ($entry1 === $entry2) {
+            return 0;
+        }
+
+        $r = $entry1->getEntryNameLength() - $entry2->getEntryNameLength();
+        if ($r === 0) {
+            $r = strcasecmp($entry1->getName(), $entry2->getName());
+        }
+        return $r;
+    }
 
     public function getIterator()
     {
@@ -96,7 +160,7 @@ class OleStorage extends OleObject implements \IteratorAggregate, \Countable, \A
         return count($this->entries);
     }
 
-    public function offsetGet($offset)
+    public function &offsetGet($offset)
     {
         return $this->entries[$offset];
     }

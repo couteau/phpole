@@ -61,7 +61,15 @@ class OleDocumentTest extends TestCase
         $this->oleDocument = new OleDocument();
         $fn = tempnam(sys_get_temp_dir(), 'ole');
         $this->oleDocument->new($fn);
+        $this->oleDocument->save();
         $this->oleDocument->close();
+
+        $x = pack('V1', 0xFFFFFFFE);
+        
+        $this->assertFileExists($fn);
+        $this->assertFileIsReadable($fn);
+        $l = stat($fn);
+        $this->assertEquals(1536, $l[7]);
 
         $this->oleDocument = new OleDocument($fn);
         $this->assertEquals(1, count($this->oleDocument));

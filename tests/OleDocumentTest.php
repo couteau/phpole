@@ -64,8 +64,6 @@ class OleDocumentTest extends TestCase
         $this->oleDocument->save();
         $this->oleDocument->close();
 
-        $x = pack('V1', 0xFFFFFFFE);
-        
         $this->assertFileExists($fn);
         $this->assertFileIsReadable($fn);
         $l = stat($fn);

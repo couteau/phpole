@@ -31,12 +31,12 @@ class OleStream extends OleObject
      * This class buffers reads by loading one full sector at a time to make small reads more efficient
      *
      * @param OleDocument $root
-     * @param mixed $stream
+     * @param OleDiretoryEntry $entry
      * @throws \Exception
      */
-    public function __construct($root, $stream = null)
+    public function __construct($root, OleDirectoryEntry $entry = null)
     {
-        parent::__construct($root, $stream);
+        parent::__construct($root, $entry);
 
         $this->firstsector = $this->entry->getStartingSector();
         $this->size = $this->entry->getStreamSize();

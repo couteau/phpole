@@ -13,30 +13,19 @@ class OleObject
 
     protected $entry;
 
-    public function __construct(OleDocument $root, $stream = null)
+    public function __construct(OleDocument $root, OleDirectoryEntry $entry = null)
     {
         $this->root = $root;
-        if (is_null($stream)) {
+        if (is_null($entry)) {
             $stream = $root->getDocumentStream();
-            $filespec = $root[$stream];
-        } elseif (is_string($stream)) {
-            if (!$stream = $root->findEntryByName($stream)) {
-                throw new \Exception("Stream {$stream} not found");
-            }
-            $filespec = $root[$stream];
-        } elseif (is_int($stream)) {
-            $filespec = $root[$stream];
-        } elseif ($stream instanceof OleDirectoryEntry) {
-            $filespec = $stream;
-        } else {
-            throw new \Exception("Invalid stream {$stream}");
+            $entry = $root[$stream];
         }
 
-        if (static::class != OleDocument::TYPE_MAP[$filespec->getObjectType()]) {
-            throw new \Exception($filespec->getName() . " is not the correct type for " . static::class);
+        if (static::class != OleDocument::TYPE_MAP[$entry->getObjectType()]) {
+            throw new \Exception($entry->getName() . " is not the correct type for " . static::class);
         }
 
-        $this->entry = $filespec;
+        $this->entry = $entry;
     }
 
     public function getEntry()

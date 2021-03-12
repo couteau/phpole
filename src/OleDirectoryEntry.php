@@ -3,7 +3,26 @@ namespace Cryptodira\PhpOle;
 
 class OleDirectoryEntry implements OleSerializable
 {
-    const FORMAT = 'A64v1C1C1V1V1V1H32V1P1P1V1P1';
+    // Unpack() format string for a single directory entry (128 bytes)
+    const READFORMAT =
+        'A64EntryName/' .       # 00 64 bytes
+        'v1EntryNameLength/' .  # 40 2 bytes
+        'C1ObjectType/' .       # 42 1 bytes
+        'C1ColorFlag/' .        # 43 1 byte
+        'V1LeftSiblingID/' .    # 44 4 bytes
+        'V1RightSiblingID/' .   # 48 4 bytes
+        'V1ChildID/' .          # 4C 4 bytes
+        'H32CLSID/' .           # 50 16 bytes
+        'V1StateBits/' .        # 60 4 bytes
+        'P1CreationTime/' .     # 64 8 bytes
+        'P1ModifiedTime/' .     # 6C 8 bytes
+        'V1StartingSector/' .    # 74 4 bytes
+        'P1StreamSize/';        # 78 8 bytes
+
+    // Pack() format string for a single directory entry (128 bytes)
+    const WRITEFORMAT = 'A64v1C1C1V1V1V1H32V1P1P1V1P1';
+
+    // Packed content of an unused directory entry (128 bytes)
     const EMPTY = 
         "\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000" .
         "\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000" .
@@ -12,14 +31,14 @@ class OleDirectoryEntry implements OleSerializable
         "\000\000" .                                                            // EntryNameLength
         "\000" .                                                                // ObjectType
         "\000" .                                                                // ColorFlag
-        "\xFF\xFF\xFF\xFF" .                                                    // LeftSiblingID
-        "\xFF\xFF\xFF\xFF" .                                                    // RightSiblingID
-        "\xFF\xFF\xFF\xFF" .                                                    // ChildID
+        "\xFF\xFF\xFF\xFF" .                                                    // LeftSiblingID = NOSTREAM
+        "\xFF\xFF\xFF\xFF" .                                                    // RightSiblingID = NOSTREAM
+        "\xFF\xFF\xFF\xFF" .                                                    // ChildID = NOSTREAM
         "\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000" .    // CLSID
         "\000\000\000\000" .                                                    // StateBits
         "\000\000\000\000\000\000\000\000" .                                    // CreationTime
         "\000\000\000\000\000\000\000\000" .                                    // ModifiedTime
-        "\xFE\xFF\xFF\xFF" .                                                    // StartingSector
+        "\xFE\xFF\xFF\xFF" .                                                    // StartingSector = ENDOFCHAIN
         "\000\000\000\000\000\000\000\000";                                     // StreamSize
     
     const LEFT = -1;
@@ -34,11 +53,27 @@ class OleDirectoryEntry implements OleSerializable
     private $objectId;
     private $entry;
 
-    public function __construct(OleDocument $root, int $objectId, array $entry)
+    public function __construct(OleDocument $root, int $objectId, $entryData, $offset = 0)
     {
         $this->root = $root;
         $this->objectId = $objectId;
-        $this->entry = $entry;
+
+        if (is_string($entryData)) {
+            $newentry = unpack(self::READFORMAT, $entryData, $offset);
+            if ($newentry['ObjectType'] === 0) {
+                throw new \InvalidArgumentException('Cannot create a directory entry object from an unused directory entry');
+            }
+
+            // unpack cuts off the final byte of the final UTF-16LE character if it is null, so we have to add it back on before converting
+            if (strlen($newentry['EntryName']) % 2 != 0) {
+                $newentry['EntryName'] .= chr(0);
+            }
+            $newentry['EntryName'] = mb_convert_encoding($newentry['EntryName'], "UTF-8", "UTF-16LE");
+
+            $this->entry = $newentry;
+        } else {
+            $this->entry = $entryData;
+        }
     }
 
     public static function new(OleDocument $root, int $objectId, $name, $type, $clsid = null, $color = OleDocument::COLOR_RED)
@@ -92,6 +127,11 @@ class OleDirectoryEntry implements OleSerializable
     public function getStartingSector()
     {
         return $this->entry['StartingSector'] === OleDocument::NOSTREAM ? null : $this->entry['StartingSector'];
+    }
+
+    public function setStartingSector($sector)
+    {
+        $this->entry['StartingSector'] = $sector;
     }
 
     public function getStreamSize()
@@ -168,7 +208,7 @@ class OleDirectoryEntry implements OleSerializable
     {
         $entry = $this->entry;
         $entry['EntryName'] = mb_convert_encoding($entry['EntryName'], "UTF-16LE", "UTF-8");
-        return pack(self::FORMAT, ...array_values($entry));
+        return pack(self::WRITEFORMAT, ...array_values($entry));
     }
 
     public function compareTo(self $entry)

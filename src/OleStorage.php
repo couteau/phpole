@@ -27,23 +27,23 @@ class OleStorage extends OleObject implements \IteratorAggregate, \Countable, \A
 
     /**
      */
-    public function __construct(OleDocument $root, OleDirectoryEntry $object = null)
+    public function __construct(OleDocument $root, OleDirectoryEntry $entry = null)
     {
-        if ($object === null) {
-            $object = $root[0];
+        if ($entry === null) {
+            $entry = $root[0];
         }
-        parent::__construct($root, $object);
+        parent::__construct($root, $entry);
         $this->readStorage();
     }
 
-    private function visitNode($entry, $callback)
+    private function walkTree($entry, $callback)
     {
         if ($entry->leftChild()) {
-            $this->visitNode($entry->leftChild(), $callback);
+            $this->walkTree($entry->leftChild(), $callback);
         }
         $callback($entry);
         if ($entry->rightChild()) {
-            $this->visitNode($entry->rightChild(), $callback);
+            $this->walkTree($entry->rightChild(), $callback);
         }
     }
 
@@ -51,7 +51,7 @@ class OleStorage extends OleObject implements \IteratorAggregate, \Countable, \A
     {
         $this->rootEntry = $this->entry->getRootEntry();
         if ($this->rootEntry) {
-            $this->visitNode($this->rootEntry,
+            $this->walkTree($this->rootEntry,
                     function ($child) {
                         $this->entries[$child->getId()] = $child;
                         $this->nameMap[$child->getName()] = $child;
@@ -61,7 +61,7 @@ class OleStorage extends OleObject implements \IteratorAggregate, \Countable, \A
 
     public function foreach(\Closure $callback)
     {
-        $this->visitNode($this->rootEntry, $callback);
+        $this->walkTree($this->rootEntry, $callback);
     }
 
     /**
@@ -72,6 +72,8 @@ class OleStorage extends OleObject implements \IteratorAggregate, \Countable, \A
      */
     public function findEntryByName($entryName)
     {
+        // could use a b-tree search algorithm for this, but most storages 
+        // have fewer than 100 entries, so that's probably overkill
         return $this->nameMap[$entryName] ?? false;
     }
 

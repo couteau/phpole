@@ -44,9 +44,9 @@ class OleDirectoryEntry implements OleSerializable
     const LEFT = -1;
     const RIGHT = 1;
     const DIRECTION = [
-        self::LEFT => 'LeftChildID',
+        self::LEFT => 'LeftSiblingID',
         0 => false,
-        self::RIGHT => 'RightChildID',
+        self::RIGHT => 'RightSiblingID',
     ];
 
     private $root;
@@ -104,6 +104,35 @@ class OleDirectoryEntry implements OleSerializable
         return new OleDirectoryEntry($root, $objectId, $entry);
     }
 
+    public function copyTo(OleStorage $dest)
+    {
+        $destRoot = $dest->getRoot();
+        $newentry = new OleDirectoryEntry($destRoot, -1, $this->entry);
+        $newentry->entry['LeftSiblingID'] = OleDocument::NOSTREAM;
+        $newentry->entry['RightSiblingID'] = OleDocument::NOSTREAM;
+        $newentry->entry['ChildID'] = OleDocument::NOSTREAM;
+        $newentry->entry['StartingSector'] = $newentry->entry['ObjectType'] === OleDocument::StorageObject ? 0 : OleDocument::ENDOFCHAIN;
+        $newentry->entry['StreamSize'] = 0;
+        $objectId = $destRoot->addEntry($newentry, false);
+        $newentry->objectId = $objectId;
+        $dest->insertEntry($newentry);
+
+        if ($this->entry['ObjectType'] === OleDocument::StreamObject) {
+            $data = $this->root->getStreamData($this->objectId);
+            $destRoot->write($objectId, $data);
+        } else {
+            $storage = $this->root->getObject($this);
+            $newstorage = $destRoot->getObject($newentry);
+
+            // copy by walking the tree using the Preorder algorithm
+            // to help keep the tree balanced in the destination storage
+            // (assuming source is balanced) since we don't implement a r-b tree
+            $storage->foreach(function ($entry) use ($newstorage) {
+                $entry->copyTo($newstorage);
+            }, OleStorage::PREORDER);
+        }
+    }
+
     public function getId()
     {
         return $this->objectId;
@@ -126,7 +155,13 @@ class OleDirectoryEntry implements OleSerializable
 
     public function getStartingSector()
     {
-        return $this->entry['StartingSector'] === OleDocument::NOSTREAM ? null : $this->entry['StartingSector'];
+        return $this->entry['StartingSector'];
+    }
+
+    public function &_getStartingSector()
+    {
+        $result =& $this->entry['StartingSector'];
+        return $result;
     }
 
     public function setStartingSector($sector)
@@ -139,6 +174,12 @@ class OleDirectoryEntry implements OleSerializable
         return $this->entry['StreamSize'];
     }
 
+    public function &_getStreamSize()
+    {
+        $result =& $this->entry['StreamSize'];
+        return $result;
+    }
+    
     public function setStreamSize($newsize)
     {
         $this->entry['StreamSize'] = $newsize;
@@ -161,7 +202,7 @@ class OleDirectoryEntry implements OleSerializable
 
     public function hasChild($direction)
     {
-        $this->entry[self::DIRECTION[$direction]] !== OleDocument::NOSTREAM;
+        return $this->entry[self::DIRECTION[$direction]] !== OleDocument::NOSTREAM;
     }
 
     public function getChild($direction)
@@ -211,6 +252,7 @@ class OleDirectoryEntry implements OleSerializable
         return pack(self::WRITEFORMAT, ...array_values($entry));
     }
 
+    // Microsoft OLE spec says entries are sorted by name length and then by a case insenstivie comparison of the name
     public function compareTo(self $entry)
     {
         if ($this === $entry) {

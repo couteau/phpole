@@ -219,11 +219,11 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
         $this->close();
     }
 
-    public function new($filepath, $format = true)
+    public function new($filepath, $format = true, $version = 0x0003, $clsid = null)
     {
         $this->filepath = $filepath;
         if ($format) {
-            $this->format();
+            $this->format($version, $clsid);
         }
         return $this;
     }
@@ -260,15 +260,10 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
 
         $headerdata = $this->header->serialize() . $this->serializeHeaderDIFAT();
 
-        if (!$this->stream) {
-            $this->stream = fopen($this->filepath, 'r+');
-        } else {
-            rewind($this->stream);
-        }
-
+        rewind($this->stream);
         fwrite($this->stream, $headerdata);
-        if ($this->header->getVersion() === 0x0004) {
-            fwrite($this->stream, str_repeat(chr(0), 0x800)); // pad header to a full sector
+        if ($this->sectorsize > self::OleHeaderSize) {
+            fwrite($this->stream, str_repeat(chr(0), $this->sectorsize - self::OleHeaderSize)); // pad header to a full sector
         }
 
         $this->header->makeClean();
@@ -357,14 +352,33 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
         $this->dirtySectors = [];
     }
 
-    public function save()
+    public function save($dest = null)
     {
+        $oldstream = null;
+        if ($dest === null) {
+            $dest = $this->filepath;
+        } elseif (!$this->filepath) {
+            $this->filepath = $dest;
+        } elseif ($dest !== $this->filepath) {
+            $oldstream = $this->stream;
+            $this->stream = null;
+        }
+
+        if (!$this->stream) {
+            $this->stream = fopen($dest, 'w+');
+        }
+
         $this->writeHeader();
         $this->writeDIFAT();
         $this->writeFAT();
         $this->writeMiniFAT();
         $this->writeDirectorySectors();
         $this->writeDirtySectors();
+
+        if ($oldstream) {
+            fclose($this->stream);
+            $this->stream = $oldstream;
+        }
     }
 
     /**
@@ -396,7 +410,9 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
             case 0x04:
                 $this->FAT_sectorformat = self::OleV4FATSectorFormat;
                 $this->DIFAT_sectorformat = self::OleV4DIFATSectorFormat;
-                fseek($this->stream, $this->sectorsize, SEEK_SET); // move to start of first sector after header
+                if ($this->stream) {
+                    fseek($this->stream, $this->sectorsize, SEEK_SET); // move to start of first sector after header
+                }
                 break;
             default:
                 throw new \Exception("Invalid OLE version");
@@ -417,11 +433,11 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
         $this->allocateFATSector();
     }
 
-    private function initializeRootStorage()
+    private function initializeRootStorage($clsid = null)
     {
         // TODO: check that first directory sector isn't already allocated
         $this->allocateDirectorySector();
-        $this->rootEntry = OleDirectoryEntry::new($this, 0, 'Root Entry', self::RootStorageObject);
+        $this->rootEntry = OleDirectoryEntry::new($this, 0, 'Root Entry', self::RootStorageObject, $clsid);
         $this->directoryEntries = [$this->rootEntry];
         $this->rootStorage = new OleStorage($this);
     }
@@ -430,30 +446,31 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
     {
         // TODO: make sure the ministream isn't already initialized
         $this->header->setFirstMiniFATSector($this->allocateSector());
-        $this->miniFAT = array_fill(0, $this->sectorsize / 4, self::FREESECT);
+        $this->miniFAT += array_fill(0, $this->sectorsize / 4, self::FREESECT);
         $this->rootEntry->setStartingSector($this->allocateSector());
+        $this->rootEntry->setStreamSize($this->sectorsize);
     }
 
-    public function format($version = 0x0003)
+    public function format($version = 0x0003, $clsid = null)
     {
+        if ($this->stream) {
+            ftruncate($this->stream, 0);
+        }
         $this->header = null;
-        $this->FAT = null;
-        $this->miniFAT = null;
+        $this->FAT = [];
+        $this->miniFAT = [];
         $this->rootStorage = null;
         $this->directoryEntries = null;
-        if ($this->stream) {
-            ftruncate($$this->stream, 0);
-        } else {
-            $this->stream = fopen($this->filepath, 'w+');
-        }
+
+        // OLE Spec says the minimum size OLE file has a header, one FAT sector, and one directory sector
         $this->initializeHeader($version);
         $this->intitializeFAT();
-        $this->initializeRootStorage();
+        $this->initializeRootStorage($clsid);
     }
 
     private function allocateDirectorySector()
     {
-        if ($s = $this->header->getFirstDirectorySector() === self::ENDOFCHAIN) {
+        if (($s = $this->header->getFirstDirectorySector()) === self::ENDOFCHAIN) {
             return $this->header->setFirstDirectorySector($this->allocateSector());
         } else {
             while ($this->FAT[$s] !== self::ENDOFCHAIN) {
@@ -513,27 +530,43 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
         return $i;
     }
 
-    private function allocateMiniSector($initialize = false, $code = self::ENDOFCHAIN, $prevSector = null)
+    private function allocateMiniSector($code = self::ENDOFCHAIN, $prevSector = null)
     {
         if (!$this->miniFAT) {
             $this->initializeMiniStream();
         }
 
         for ($i = 0; $i < count($this->miniFAT) && $this->miniFAT[$i] !== self::FREESECT; $i++);
-        if ($i ===  count($this->minFAT)) {
-            // Allocate a new miniFAT sector
+        if ($i ===  count($this->miniFAT)) {
+            // Alloate a new mini-FAT sector
+            $this->allocateSector(self::ENDOFCHAIN, $this->endOfChain($this->header->getFirstMiniFATSector()));
+            $this->miniFAT = array_merge($this->miniFAT, array_fill(0, $this->sectorsize / 4, self::FREESECT));
         }
         $this->miniFAT[$i] = $code;
+        while ($i * $this->minisectorsize >= $this->getMiniStreamSize()) {
+            // allocate a new sector to the ministream
+            $this->allocateSector(self::ENDOFCHAIN, $this->endOfChain($this->rootEntry->getStartingSector()));
+            $this->rootEntry->setStreamSize($this->rootEntry->getStreamSize() + $this->sectorsize);
+        }
         if ($prevSector) {
-            $this->FAT[$prevSector] = $i;
+            $this->miniFAT[$prevSector] = $i;
         }
-        if ($initialize) {
-            $this->writeSectorData($i, '');
-        } else {
-            $this->dirtySectors[$i] = str_repeat(chr(0), $this->sectorsize);
-        }
-        $this->FATDirty = true;
+        
         return $i;
+    }
+
+    /**
+     * Whether stream's size is below the threshold for being stored in the ministream storage
+     * 
+     * @param int|OleDirectoryEntry $stream
+     */
+    public function isMiniStream($stream)
+    {
+        if (!$stream instanceof OleDirectoryEntry) {
+            $stream = $this->directoryEntries[$stream];
+        }
+        return $stream->getObjectType() === self::StreamObject 
+            && $stream->getStreamSize() < $this->header->getMiniStreamCutoff();
     }
 
     /**
@@ -545,16 +578,52 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
     }
 
     /**
+     * Get the size of big sectors in this Ole file (512 or 4096)
+     */
+    public function getMiniSectorSize()
+    {
+        return $this->minisectorsize;
+    }
+
+    /**
      * Get the the sector number of the next sector in the chain
      *
      * @param int $sector
      */
     public function getNextSector($sector)
     {
-        if ($sector <= self::MAXREGSECT) {
+        if ($sector <= self::MAXREGSECT && $sector < count($this->FAT)) {
             return $this->FAT[$sector];
         } else {
             return $sector;
+        }
+    }
+
+    /**
+     * Get the the sector number of the next sector in a chain in the MiniFAT
+     *
+     * @param int $sector
+     */
+    public function getNextMiniSector($sector)
+    {
+        if ($sector <= self::MAXREGSECT && $sector < count($this->miniFAT)) {
+            return $this->miniFAT[$sector];
+        } else {
+            return $sector;
+        }
+    }
+
+    private function endOfChain($sector, $fat = null)
+    {
+        if ($fat === null) {
+            $fat = $this->FAT;
+        }
+
+        if ($sector <= self::MAXREGSECT && $sector < count($fat)) {
+            for ($s = $sector; $fat[$s] !== self::ENDOFCHAIN; $s = $fat[$s]);
+            return $s;
+        } else {
+            return false;
         }
     }
 
@@ -609,6 +678,15 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
         fwrite($this->stream, $data);
     }
 
+    /**
+     * Get the currently allocated size of the ministream
+     * 
+     * @return int
+     */
+    private function getMiniStreamSize()
+    {
+        return $this->rootEntry->getStreamSize();
+    }
     /**
      * Read a single sector from the mini stream
      *
@@ -773,14 +851,14 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
                 $this,
                 'getSectorData'
             );
-            $fat = $this->FAT;
+            $fat =& $this->FAT;
             $bs = $this->sectorsize;
         } else {
             $readsector = array(
                 $this,
                 'getMiniSectorData'
             );
-            $fat = $this->miniFAT;
+            $fat =& $this->miniFAT;
             $bs = 64;
         }
 
@@ -827,14 +905,12 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
         if ($streamid < 0 || $streamid >= sizeof($this->directoryEntries))
             throw new \InvalidArgumentException("Invalid StreamID $streamid");
 
-        if ($this->directoryEntries[$streamid]->getObjectType() !== self::StreamObject 
-            && $this->directoryEntries[$streamid]->getObjectType() !== self::RootStorageObject)
+        $entry = $this->directoryEntries[$streamid];
+        if ($entry->getObjectType() !== self::StreamObject && $entry->getObjectType() !== self::RootStorageObject)
             throw new \InvalidArgumentException("StreamID $streamid is not a stream");
 
-        if ($offset > $this->directoryEntries[$streamid]->getStreamSize())
-            throw new \InvalidArgumentException("Attempt to read past end of stream");
-
-        if ($streamid == 0 || $this->directoryEntries[$streamid]->getStreamSize() >= $this->miniStreamCutoff) {
+        // TODO: move a ministream allocated stream to the regular FAT if it gets too big for the ministream
+        if ($streamid == 0 || max($entry->getStreamSize(), $offset + strlen($data)) >= $this->miniStreamCutoff) {
             $readsector = array(
                 $this,
                 'getSectorData'
@@ -847,7 +923,7 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
                 $this,
                 'allocateSector'
             );
-            $fat = $this->FAT;
+            $fat =& $this->FAT;
             $bs = $this->sectorsize;
         } else {
             $readsector = array(
@@ -862,13 +938,16 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
                 $this,
                 'allocateMiniSector'
             );
-            $fat = $this->miniFAT;
+            $fat =& $this->miniFAT;
             $bs = 64;
         }
 
         // first find the sector containing the starting offset
         // if offset is beyond the current end of the stream, allocate additional empty sectors
-        $s = $this->directoryEntries[$streamid]->getStartingSector() ?? $allocatesector();
+        if (($s = $this->directoryEntries[$streamid]->getStartingSector()) === self::ENDOFCHAIN) {
+            $s = $allocatesector();
+            $this->directoryEntries[$streamid]->setStartingSector($s);
+        }
         $i = 0;
         while ($i < $offset) {
             if ($offset < $i + $bs)
@@ -890,7 +969,7 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
         $strOffset += $l;
         $bytesLeft -= $l;
 
-        // keep writing sectors until we've written all the data
+        // keep writing sectors (or a partial sector at the end) until we've written all the data
         while ($bytesLeft) {
             if ($fat[$s] === self::ENDOFCHAIN) {
                 $s = $allocatesector(self::ENDOFCHAIN, $s);
@@ -904,10 +983,11 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
             $bytesLeft -= $l;
         }
         
-        if ($offset + $byteswritten > $this->directoryEntries[$streamid]->getStreamSize()) {
-            $this->directoryEntries[$streamid]->setStreamSize($offset + $byteswritten);
+        if ($offset + $byteswritten > $entry->getStreamSize()) {
+            $entry->setStreamSize($offset + $byteswritten);
         }
-        return strlen($data);
+
+        return $byteswritten;
     }
 
     /**
@@ -918,11 +998,16 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
      */
     public function getStreamData($streamid)
     {
-        if ($this->directoryEntries[$streamid]->getObjectType() != 2) {
+        if ($streamid instanceof OleDirectoryEntry) {
+            $entry = $streamid;
+        } else {
+            $entry = $this->directoryEntries[$streamid];
+        }
+        if ($entry->getObjectType() === 1) {
             return null; // should this throw an error?
         }
 
-        if ($streamid === 0 || $this->directoryEntries[$streamid]->getStreamSize() >= $this->miniStreamCutoff) {
+        if ($entry->getId() === 0 || $entry->getStreamSize() >= $this->miniStreamCutoff) {
             $readsector = array(
                 $this,
                 'getSectorData'
@@ -936,14 +1021,14 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
             $fat = $this->miniFAT;
         }
 
-        $s = $this->directoryEntries[$streamid]->getStartingSector();
+        $s = $entry->getStartingSector();
         $data = '';
         while ($s != self::ENDOFCHAIN) {
             $data .= $readsector($s);
             $s = $fat[$s];
         }
 
-        return substr($data, 0, $this->directoryEntries[$streamid]->getStreamSize());
+        return substr($data, 0, $entry->getStreamSize());
     }
 
     /**
@@ -961,20 +1046,39 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
         return false;
     }
 
-    public function newEntry($name, $type = self::StreamObject, $clsid = null, OleStorage $parent = null) 
+    /**
+     * Add an OleDirectoryEntry to the document's directory entry list, and optionally insert it into a storage
+     * 
+     * @param OleDirectoryEntry $entry
+     * @param OleStorage|bool|null $parent - false means don't insert, null means default to the root storage
+     * @param int $objectId - the objectId to assign or null to assign one here
+     * @return int - the assigned objectId
+     */
+    public function addEntry(OleDirectoryEntry $entry, $parent = null, $objectId = null)
     {
-        if ($parent === null) {
-            $parent = $this->rootStorage;
-        }
         $entriesPerSector = $this->sectorsize / self::OleDirectoryEntrySize;
         if (count($this->directoryEntries) % $entriesPerSector === 0) {
             $this->allocateDirectorySector();
         }
 
+        if ($parent === null) {
+            $parent = $this->rootStorage;
+        }
+        if (!$objectId) {
+            $objectId = count($this->directoryEntries);
+        }
+        $this->directoryEntries[$objectId] = $entry;
+        if ($parent) {
+            $parent->insertEntry($entry);
+        }
+        return $objectId;
+    }
+
+    public function newEntry($name, $type = self::StreamObject, $clsid = null, OleStorage $parent = null) 
+    {
         $objectId = count($this->directoryEntries);
         $entry = OleDirectoryEntry::new($this, $objectId, $name, $type, $clsid);
-        $this->directoryEntries[$objectId] = $entry;
-        $parent->insertEntry($entry);
+        $this->addEntry($entry, $parent, $objectId);
 
         return $entry;
     }
@@ -1124,5 +1228,34 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
     public function offsetSet($offset, $value)
     {
         throw new \BadMethodCallException('OleDocument file specs are readonly');
+    }
+
+    public function getMaxUsedSector()
+    {
+        $result = 0;
+        foreach ($this->FAT as $index => $fatentry)
+        {
+            if ($fatentry !== self::FREESECT) {
+                $result = $index;
+            }
+        }
+        return $result;
+    }
+
+    public function serialize()
+    {
+        $this->writeDIFAT();
+        $this->writeFAT();
+        $this->writeMiniFAT();
+        $this->writeDirectorySectors();
+
+        $result = $this->header->serialize() . $this->serializeHeaderDIFAT();
+        if ($this->sectorsize > self::OleHeaderSize) {
+            $result .= str_repeat(chr(0), $this->sectorsize - self::OleHeaderSize);
+        }
+        for ($i = 0; $i <= $this->getMaxUsedSector(); $i++) {
+            $result .= $this->getSectorData($i);
+        }
+        return $result;
     }
 }

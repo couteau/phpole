@@ -9,21 +9,60 @@ namespace Cryptodira\PhpOle;
  */
 class OleStream extends OleObject
 {
-
-    private $fat;
-
+    /**
+     * The sector size for this stream
+     *
+     * @var int
+     */
     private $sectorsize;
 
+    /**
+     * Read the data for a given sector
+     *
+     * @var \Closure
+     */
     private $readsector;
 
+    /**
+     * Find the next sector in the chain
+     *
+     * @var \Closure
+     */
+    private $nextsector;
+
+    /**
+     * Pointer to the current sector in the stream
+     *
+     * @var int
+     */
     private $fatpointer;
 
+    /**
+     * The number of the first sector in the stream
+     *
+     * @var int
+     */
     private $firstsector;
 
+    /**
+     * Buffered data of a single sector in the stream (pointed to by $fatpointer)
+     *
+     * @var string
+     */
     private $buffer;
 
+    /**
+     * The size of the stream
+     *
+     * @var int
+     */
     private $size;
 
+    /**
+     * The current seek position within the stream
+     *
+     * @var int
+     */
     private $pos;
 
     /**
@@ -31,37 +70,37 @@ class OleStream extends OleObject
      * This class buffers reads by loading one full sector at a time to make small reads more efficient
      *
      * @param OleDocument $root
-     * @param OleDiretoryEntry $entry
+     * @param OleDiretoryEntry|null $entry
      * @throws \Exception
      */
     public function __construct($root, OleDirectoryEntry $entry = null)
     {
         parent::__construct($root, $entry);
 
-        $this->firstsector = $this->entry->getStartingSector();
-        $this->size = $this->entry->getStreamSize();
+        $this->firstsector =& $this->entry->_getStartingSector();
+        $this->size =& $this->entry->_getStreamSize();
 
-        // Use a closure/binding to access the internals of the Ole document -- simulating a C++ friend relationship
-        $initialize = function (OleDocument $root, $size, &$readsector, &$fat, &$sectorsize) {
-            if ($size >= $root->header['MiniStreamCutoff']) {
-                $readsector = \Closure::fromCallable([
-                    $root,
-                    'getSectorData'
-                ]);
-                $fat = $root->FAT;
-                $sectorsize = $root->sectorsize;
-            } else {
-                $readsector = \Closure::fromCallable([
-                    $root,
-                    'getMiniSectorData'
-                ]);
-                $fat = $root->MiniFAT;
-                $sectorsize = 64;
-            }
-        };
-
-        $initialize = $initialize->bindTo($this, $root);
-        $initialize($root, $this->size, $this->readsector, $this->fat, $this->sectorsize);
+        if ($root->isMiniStream($this->entry)) {
+            $this->readsector = \Closure::fromCallable([
+                $root,
+                'getMiniSectorData'
+            ]);
+            $this->nextsector = \Closure::fromCallable([
+                $root,
+                'getNextMiniSector'
+            ]);
+            $this->sectorsize = $root->getMiniSectorSize();
+        } else {
+            $this->readsector = \Closure::fromCallable([
+                $root,
+                'getSectorData'
+            ]);
+            $this->nextsector = \Closure::fromCallable([
+                $root,
+                'getNextSector'
+            ]);
+            $this->sectorsize = $root->getSectorSize();
+        }
 
         $this->fatpointer = $this->firstsector;
         $this->pos = 0;
@@ -79,9 +118,9 @@ class OleStream extends OleObject
         $newsector = intdiv($pos, $this->sectorsize);
 
         if ($newsector != $oldsector) {
-            $this->fatpointer = $this->firstsector;
-            for ($i = 0; $i < $newsector && $this->fatpointer != OleDocument::ENDOFCHAIN; $i++)
-                $this->fatpointer = $this->fat[$this->fatpointer];
+            for ($i = 0, $this->fatpointer = $this->firstsector; 
+                $i < $newsector && $this->fatpointer != OleDocument::ENDOFCHAIN; 
+                $i++, $this->fatpointer = ($this->nextsector)($this->fatpointer));
 
             $this->buffer = null;
         }
@@ -176,14 +215,14 @@ class OleStream extends OleObject
             $data = substr($this->buffer, $sector_offset, $bytes);
             $this->pos += $bytes;
             if ($sector_offset + $bytes == $this->sectorsize) {
-                $this->fatpointer = $this->fat[$this->fatpointer];
+                $this->fatpointer = ($this->nextsector)($this->fatpointer);
                 $this->buffer = null;
             }
         } else {
             $data = substr($this->buffer, $sector_offset);
             $this->buffer = null;
             $bytesread = $this->sectorsize - $sector_offset;
-            $this->fatpointer = $this->fat[$this->fatpointer];
+            $this->fatpointer = ($this->nextsector)($this->fatpointer);
             while ($this->fatpointer != OleDocument::ENDOFCHAIN && $bytesread < $bytes) {
                 if (($bytes - $bytesread) < $this->sectorsize) {
                     $this->buffer = ($this->readsector)($this->fatpointer);
@@ -195,7 +234,7 @@ class OleStream extends OleObject
                     $bytesread += $this->sectorsize;
                 }
 
-                $this->fatpointer = $this->fat[$this->fatpointer];
+                $this->fatpointer = ($this->nextsector)($this->fatpointer);
             }
             $this->pos += $bytesread;
         }

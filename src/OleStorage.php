@@ -8,6 +8,9 @@ namespace Cryptodira\PhpOle;
  */
 class OleStorage extends OleObject implements \IteratorAggregate, \Countable, \ArrayAccess
 {
+    const INORDER = 0;
+    const PREORDER = -1;
+    const POSTORDER = 1;
     /**
      * Root entry of red-black directory tree
      *
@@ -36,14 +39,24 @@ class OleStorage extends OleObject implements \IteratorAggregate, \Countable, \A
         $this->readStorage();
     }
 
-    private function walkTree($entry, $callback)
+    private function walkTree($entry, $callback, $order = self::INORDER)
     {
-        if ($entry->leftChild()) {
-            $this->walkTree($entry->leftChild(), $callback);
+        if ($order >= self::INORDER && $entry->leftChild()) {
+            $this->walkTree($entry->leftChild(), $callback, $order);
+            if ($order === self::POSTORDER && $entry->rightChild()) {
+                $this->walkTree($entry->rightChild(), $callback, $order);
+            }
         }
+
         $callback($entry);
-        if ($entry->rightChild()) {
-            $this->walkTree($entry->rightChild(), $callback);
+
+        if ($order <= self::INORDER) {
+            if ($order === self::PREORDER && $entry->leftChild()) {
+                $this->walkTree($entry->leftChild(), $callback, $order);
+            }
+            if ($entry->rightChild()) {
+                $this->walkTree($entry->rightChild(), $callback, $order);
+            }        
         }
     }
 
@@ -59,9 +72,9 @@ class OleStorage extends OleObject implements \IteratorAggregate, \Countable, \A
         }
     }
 
-    public function foreach(\Closure $callback)
+    public function foreach(\Closure $callback, $order = self::INORDER)
     {
-        $this->walkTree($this->rootEntry, $callback);
+        $this->walkTree($this->rootEntry, $callback, $order);
     }
 
     /**
@@ -89,6 +102,10 @@ class OleStorage extends OleObject implements \IteratorAggregate, \Countable, \A
 
     public function getStreamData($streamId)
     {
+        if ($streamId instanceof OleDirectoryEntry) {
+            $streamId = $streamId->getId();
+        }
+
         if (array_key_exists($streamId, $this->entries)) {
             return $this->root->getStreamData($streamId);
         } else {
@@ -130,26 +147,13 @@ class OleStorage extends OleObject implements \IteratorAggregate, \Countable, \A
             $this->entry->setRootEntry($entry);
         } else {
             $insertNode = $this->findInsertionPoint($this->rootEntry, $entry);
-            $insertNode->setChild($insertNode, $insertNode->compareTo($entry), $entry);
+            $insertNode->setChild($insertNode->compareTo($entry), $entry);
         }
 
         // reload the entries and nameMap arrays
         $this->readStorage();
 
         return $this;
-    }
-
-    private function compareEntries($entry1, $entry2)
-    {
-        if ($entry1 === $entry2) {
-            return 0;
-        }
-
-        $r = $entry1->getEntryNameLength() - $entry2->getEntryNameLength();
-        if ($r === 0) {
-            $r = strcasecmp($entry1->getName(), $entry2->getName());
-        }
-        return $r;
     }
 
     public function getIterator()

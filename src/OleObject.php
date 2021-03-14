@@ -3,7 +3,7 @@ namespace Cryptodira\PhpOle;
 
 /**
  *
- * @author stuart
+ * @author Stuart C. Naifeh <stuart@cryptodira.org>
  *
  */
 class OleObject
@@ -11,6 +11,11 @@ class OleObject
 
     protected $root;
 
+    /**
+     * The Directory Entry within the root OLE file for this object
+     *
+     * @var OleDirectoryEntry
+     */
     protected $entry;
 
     public function __construct(OleDocument $root, OleDirectoryEntry $entry = null)
@@ -32,5 +37,14 @@ class OleObject
     {
         return $this->entry;
     }
-}
 
+    public function getRoot()
+    {
+        return $this->root;
+    }
+
+    public function copyTo(OleStorage $dest)
+    {
+        $this->entry->copyTo($dest);
+    }
+}

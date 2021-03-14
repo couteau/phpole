@@ -1128,7 +1128,7 @@ class OleDocument implements \IteratorAggregate, \Countable, \ArrayAccess
     /**
      * Return the root directory of the Ole document
      *
-     * @return int
+     * @return OleStorage
      */
     public function getRootStorage()
     {
